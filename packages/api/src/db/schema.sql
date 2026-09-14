@@ -394,3 +394,16 @@ CREATE INDEX IF NOT EXISTS idx_evaluations_api_call ON evaluations(api_call_id);
 --    (frozen at insert) but not deletes (no FK — token rows can be revoked). ─
 ALTER TABLE api_calls ADD COLUMN IF NOT EXISTS token_name VARCHAR(100);
 CREATE INDEX IF NOT EXISTS idx_evaluations_org      ON evaluations(org_id, created_at DESC);
+
+-- ── provider_account_id — the provider-side account/team identifier that some
+--    billing APIs require in the request path and that the API key itself does
+--    not carry. Only xAI needs it today: the Management API routes are
+--    /v1/billing/teams/{teamId}/… and the teamId is NOT discoverable through
+--    the API — it is copied from console.x.ai → Settings → Team.
+--    Deliberately stored in PLAINTEXT, unlike api_key_encrypted: this is not a
+--    secret (it sits in the console URL), and encrypting it would stop the
+--    Keys page from showing it back for editing and stop SQL from filtering on
+--    it. Please don't "fix" this by wrapping it in encrypt().
+--    Generic name, not xai_team_id, so the next provider whose billing API is
+--    scoped by an org/project id reuses the column instead of adding one. ────
+ALTER TABLE provider_credentials ADD COLUMN IF NOT EXISTS provider_account_id VARCHAR(120);

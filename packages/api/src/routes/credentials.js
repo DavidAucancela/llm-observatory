@@ -3,6 +3,8 @@ const { z } = require('zod');
 const pool = require('../db/pool');
 const { encrypt, decrypt, maskKey } = require('../db/crypto');
 const { requireAdmin } = require('../middleware/auth');
+const { PROVIDERS, PROVIDER_CAPS } = require('../constants/providers');
+const { validateGrokManagementKey } = require('../services/providerUsage');
 
 const router = express.Router();
 
@@ -13,11 +15,48 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
     .finally(() => clearTimeout(id));
 }
 
+// Columns returned to the client on every credential read. provider_account_id
+// is included on purpose — it is not a secret (see the schema comment) and the
+// Keys page has to show it back so a mistyped team id can be corrected.
+const CRED_COLUMNS =
+  'id, provider, key_type, label, key_hint, provider_account_id, is_valid, last_tested_at, created_at';
+
 const CredentialSchema = z.object({
-  provider: z.enum(['anthropic', 'openai', 'gemini', 'grok', 'kimi']),
+  provider: z.enum(PROVIDERS),
   key_type: z.enum(['sdk', 'admin']),
   label:    z.string().min(1).max(100),
   value:    z.string().min(10),
+  // Loose length check rather than a format regex: xAI's team id format isn't
+  // contractually documented, and rejecting a valid id would be worse than
+  // letting /test surface a real 403 from the provider.
+  provider_account_id: z.string().trim().min(4).max(120).optional(),
+}).superRefine((data, ctx) => {
+  const caps = PROVIDER_CAPS[data.provider];
+  // Previously any provider could be given an admin key. For gemini/kimi that
+  // key was dead weight: nothing ever read it, /test validated it against the
+  // plain models endpoint, and it made the credential look meaningful.
+  if (data.key_type === 'admin' && !caps.adminKey) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom, path: ['key_type'],
+      message: `${data.provider} no tiene claves admin — usa key_type "sdk"`,
+    });
+  }
+  if (data.key_type === 'admin' && caps.accountId === 'required' && !data.provider_account_id) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom, path: ['provider_account_id'],
+      message: 'Falta el Team ID del proveedor (xAI: consola → Settings → Team)',
+    });
+  }
+});
+
+// Only the two non-secret fields are editable. The key value never is: rotating
+// a key means creating a new credential, and letting PATCH touch it would make
+// the key_hint / is_valid columns lie.
+const CredentialPatchSchema = z.object({
+  label:               z.string().min(1).max(100).optional(),
+  provider_account_id: z.string().trim().min(4).max(120).optional(),
+}).refine(d => d.label !== undefined || d.provider_account_id !== undefined, {
+  message: 'Nada que actualizar',
 });
 
 // GET /api/credentials — list credentials for current org (keys masked)
@@ -25,7 +64,7 @@ router.get('/', async (req, res, next) => {
   try {
     const { orgId } = req.user;
     const result = await pool.query(
-      `SELECT id, provider, key_type, label, key_hint, is_valid, last_tested_at, created_at
+      `SELECT ${CRED_COLUMNS}
        FROM provider_credentials WHERE org_id = $1
        ORDER BY provider, key_type, created_at DESC`,
       [orgId]
@@ -38,17 +77,51 @@ router.get('/', async (req, res, next) => {
 router.post('/', requireAdmin, async (req, res, next) => {
   try {
     const { orgId } = req.user;
-    const { provider, key_type, label, value } = CredentialSchema.parse(req.body);
+    const { provider, key_type, label, value, provider_account_id } = CredentialSchema.parse(req.body);
     const encrypted = encrypt(value);
     const hint      = maskKey(value);
 
     const result = await pool.query(
-      `INSERT INTO provider_credentials (org_id, provider, key_type, label, api_key_encrypted, key_hint, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())
-       RETURNING id, provider, key_type, label, key_hint, is_valid, last_tested_at, created_at`,
-      [orgId, provider, key_type, label, encrypted, hint]
+      `INSERT INTO provider_credentials (org_id, provider, key_type, label, api_key_encrypted, key_hint, provider_account_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       RETURNING ${CRED_COLUMNS}`,
+      [orgId, provider, key_type, label, encrypted, hint, provider_account_id || null]
     );
     res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
+    next(err);
+  }
+});
+
+// PATCH /api/credentials/:id — edit the non-secret fields.
+// Exists because DELETE cascades into api_calls: without this route, fixing a
+// mistyped team id would mean deleting the credential and taking every synced
+// row of history with it.
+router.patch('/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const { orgId } = req.user;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'ID inválido' });
+
+    const patch = CredentialPatchSchema.parse(req.body);
+    const sets = [];
+    const vals = [];
+    if (patch.label !== undefined)               { vals.push(patch.label);               sets.push(`label = $${vals.length}`); }
+    if (patch.provider_account_id !== undefined) { vals.push(patch.provider_account_id); sets.push(`provider_account_id = $${vals.length}`); }
+    // Changing the account id can invalidate a credential that tested fine, so
+    // the validity verdict goes back to "untested" rather than staying stale.
+    sets.push('is_valid = NULL', 'last_tested_at = NULL', 'updated_at = NOW()');
+    vals.push(id, orgId);
+
+    const result = await pool.query(
+      `UPDATE provider_credentials SET ${sets.join(', ')}
+       WHERE id = $${vals.length - 1} AND org_id = $${vals.length}
+       RETURNING ${CRED_COLUMNS}`,
+      vals
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Credencial no encontrada' });
+    res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
     next(err);
@@ -91,6 +164,92 @@ router.post('/:id/ping', requireAdmin, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// One tester per (provider, key_type). Every tester returns { valid, error }.
+// A provider missing a 'admin' entry (gemini, kimi — no admin-key concept)
+// falls through to the default below instead of silently validating an admin
+// key against the plain models endpoint, which is what the old if/else chain
+// did: gemini and kimi's branches never looked at key_type at all, so an
+// "admin" key of theirs was marked valid without ever meaning anything.
+const PROVIDER_TESTERS = {
+  anthropic: {
+    async admin(apiKey) {
+      const response = await fetchWithTimeout(
+        'https://api.anthropic.com/v1/organizations/usage_report/messages?limit=1',
+        { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' } }
+      );
+      if (response.status === 401 || response.status === 403) {
+        return { valid: false, error: `Anthropic Admin API respondió con ${response.status}` };
+      }
+      return { valid: response.status === 200 || response.status === 400, error: null };
+    },
+    async sdk(apiKey) {
+      const response = await fetchWithTimeout('https://api.anthropic.com/v1/models', {
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
+      });
+      return response.status === 200
+        ? { valid: true, error: null }
+        : { valid: false, error: `Anthropic API respondió con ${response.status}` };
+    },
+  },
+  openai: {
+    async admin(apiKey) {
+      const startOfMonth = Math.floor(new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() / 1000);
+      const response = await fetchWithTimeout(
+        `https://api.openai.com/v1/organization/usage/completions?start_time=${startOfMonth}&limit=1`,
+        { headers: { Authorization: `Bearer ${apiKey}` } }
+      );
+      return response.status === 200
+        ? { valid: true, error: null }
+        : { valid: false, error: `OpenAI Organization API respondió con ${response.status}` };
+    },
+    async sdk(apiKey) {
+      const response = await fetchWithTimeout('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` }
+      });
+      return response.status === 200
+        ? { valid: true, error: null }
+        : { valid: false, error: `OpenAI API respondió con ${response.status}` };
+    },
+  },
+  gemini: {
+    async sdk(apiKey) {
+      const response = await fetchWithTimeout(
+        'https://generativelanguage.googleapis.com/v1beta/models',
+        { headers: { 'x-goog-api-key': apiKey } }
+      );
+      return response.status === 200
+        ? { valid: true, error: null }
+        : { valid: false, error: `Gemini API respondió con ${response.status}` };
+    },
+  },
+  grok: {
+    // A single GET call: the Management API's own validation endpoint returns
+    // the key's teamId and acls, so the team-id match and the Billing scope
+    // check both happen without a second request to /prepaid/balance.
+    async admin(apiKey, accountId) {
+      return validateGrokManagementKey(apiKey, accountId);
+    },
+    async sdk(apiKey) {
+      const response = await fetchWithTimeout('https://api.x.ai/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` }
+      });
+      return response.status === 200
+        ? { valid: true, error: null }
+        : { valid: false, error: `xAI API respondió con ${response.status}` };
+    },
+  },
+  kimi: {
+    async sdk(apiKey) {
+      const response = await fetchWithTimeout('https://api.moonshot.ai/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}` }
+      });
+      return response.status === 200
+        ? { valid: true, error: null }
+        : { valid: false, error: `Moonshot API respondió con ${response.status}` };
+    },
+  },
+};
+
 // POST /api/credentials/:id/test — validate a key against provider API
 router.post('/:id/test', requireAdmin, async (req, res, next) => {
   try {
@@ -99,70 +258,18 @@ router.post('/:id/test', requireAdmin, async (req, res, next) => {
     if (isNaN(id)) return res.status(400).json({ error: 'ID inválido' });
 
     const row = await pool.query(
-      'SELECT provider, key_type, api_key_encrypted FROM provider_credentials WHERE id = $1 AND org_id = $2',
+      'SELECT provider, key_type, api_key_encrypted, provider_account_id FROM provider_credentials WHERE id = $1 AND org_id = $2',
       [id, orgId]
     );
     if (!row.rows.length) return res.status(404).json({ error: 'Credencial no encontrada' });
 
-    const { provider, key_type, api_key_encrypted } = row.rows[0];
+    const { provider, key_type, api_key_encrypted, provider_account_id } = row.rows[0];
     const apiKey = decrypt(api_key_encrypted);
-    let valid    = false;
-    let errorMsg = null;
 
-    if (provider === 'anthropic') {
-      if (key_type === 'admin') {
-        const response = await fetchWithTimeout(
-          'https://api.anthropic.com/v1/organizations/usage_report/messages?limit=1',
-          { headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' } }
-        );
-        valid = response.status === 200 || response.status === 400;
-        if (response.status === 401 || response.status === 403) {
-          valid    = false;
-          errorMsg = `Anthropic Admin API respondió con ${response.status}`;
-        }
-      } else {
-        const response = await fetchWithTimeout('https://api.anthropic.com/v1/models', {
-          headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
-        });
-        valid = response.status === 200;
-        if (!valid) errorMsg = `Anthropic API respondió con ${response.status}`;
-      }
-    } else if (provider === 'openai') {
-      if (key_type === 'admin') {
-        const startOfMonth = Math.floor(new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() / 1000);
-        const response = await fetchWithTimeout(
-          `https://api.openai.com/v1/organization/usage/completions?start_time=${startOfMonth}&limit=1`,
-          { headers: { Authorization: `Bearer ${apiKey}` } }
-        );
-        valid = response.status === 200;
-        if (!valid) errorMsg = `OpenAI Organization API respondió con ${response.status}`;
-      } else {
-        const response = await fetchWithTimeout('https://api.openai.com/v1/models', {
-          headers: { Authorization: `Bearer ${apiKey}` }
-        });
-        valid = response.status === 200;
-        if (!valid) errorMsg = `OpenAI API respondió con ${response.status}`;
-      }
-    } else if (provider === 'gemini') {
-      const response = await fetchWithTimeout(
-        'https://generativelanguage.googleapis.com/v1beta/models',
-        { headers: { 'x-goog-api-key': apiKey } }
-      );
-      valid = response.status === 200;
-      if (!valid) errorMsg = `Gemini API respondió con ${response.status}`;
-    } else if (provider === 'grok') {
-      const response = await fetchWithTimeout('https://api.x.ai/v1/models', {
-        headers: { Authorization: `Bearer ${apiKey}` }
-      });
-      valid = response.status === 200;
-      if (!valid) errorMsg = `xAI API respondió con ${response.status}`;
-    } else if (provider === 'kimi') {
-      const response = await fetchWithTimeout('https://api.moonshot.ai/v1/models', {
-        headers: { Authorization: `Bearer ${apiKey}` }
-      });
-      valid = response.status === 200;
-      if (!valid) errorMsg = `Moonshot API respondió con ${response.status}`;
-    }
+    const tester = PROVIDER_TESTERS[provider]?.[key_type];
+    const { valid, error: errorMsg } = tester
+      ? await tester(apiKey, provider_account_id)
+      : { valid: false, error: `${provider} no tiene claves de tipo "${key_type}"` };
 
     await pool.query(
       'UPDATE provider_credentials SET is_valid = $1, last_tested_at = NOW() WHERE id = $2',

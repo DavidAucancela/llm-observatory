@@ -1,9 +1,8 @@
 const pool = require('../db/pool');
 const { decrypt } = require('../db/crypto');
-const {
-  fetchAnthropicUsage, fetchOpenAIUsage, summarizeBuckets,
-  fetchAnthropicRealCost, fetchOpenAIRealCost,
-} = require('../services/providerUsage');
+const { summarizeBuckets } = require('../services/providerUsage');
+const { billingFor, reconcilableProviders } = require('../services/providerRegistry');
+const { requiresAccountId } = require('../constants/providers');
 
 // Fallback deviation threshold (%) used when an org has reconciliation alerting
 // enabled (alert_rules.metric = 'reconciliation_deviation') but didn't set an
@@ -19,17 +18,25 @@ const DEFAULT_DEVIATION_THRESHOLD_PCT = 10;
 // SDK-side bugs like WhisperX's retry over-billing, but not real billing
 // discrepancies), but keeps reconciliation running instead of going dark.
 // `source` on reconciliation_runs records which one actually produced the row.
-async function fetchProviderTotal(provider, apiKey, periodStart, periodEnd) {
+// `cred` is { apiKey, accountId } — accountId is provider_account_id, needed by
+// providers whose billing routes are scoped by a team/org id (xAI).
+//
+// Dispatch goes through the registry rather than a ternary. The old
+// `provider === 'anthropic' ? … : fetchOpenAIRealCost(…)` treated every
+// non-Anthropic provider as OpenAI, so a Grok admin key was sent to
+// api.openai.com. The caller guarantees `billingFor(provider)` is non-null.
+async function fetchProviderTotal(provider, cred, periodStart, periodEnd) {
+  const billing = billingFor(provider);
   try {
-    const total = provider === 'anthropic'
-      ? await fetchAnthropicRealCost(apiKey, periodStart, periodEnd)
-      : await fetchOpenAIRealCost(apiKey, periodStart, periodEnd);
+    const total = await billing.realCost(cred, periodStart, periodEnd);
     return { total, source: 'provider_costs_api' };
   } catch (err) {
+    // Only providers with an independent token-usage source can fall back. For
+    // the rest (xAI: usage and billed cost are the same call) re-throwing is
+    // the honest outcome — a row marked `error`, not a number we made up.
+    if (!billing.usage) throw err;
     console.warn(`[reconciliation] ${provider} real Costs API failed, falling back to token estimate:`, err.message);
-    const buckets = provider === 'anthropic'
-      ? await fetchAnthropicUsage(apiKey, periodStart, periodEnd)
-      : await fetchOpenAIUsage(apiKey, periodStart, periodEnd);
+    const buckets = await billing.usage(cred, periodStart, periodEnd);
     const { costUsd } = summarizeBuckets(buckets, provider);
     return { total: costUsd, source: 'token_estimate_fallback' };
   }
@@ -67,8 +74,8 @@ async function sendReconciliationAlert(webhookUrl, provider, providerComputedUsd
   }
 }
 
-async function reconcileOrgProvider(orgId, provider, apiKey, periodStart, periodEnd) {
-  const { total: providerComputedUsd, source } = await fetchProviderTotal(provider, apiKey, periodStart, periodEnd);
+async function reconcileOrgProvider(orgId, provider, cred, periodStart, periodEnd) {
+  const { total: providerComputedUsd, source } = await fetchProviderTotal(provider, cred, periodStart, periodEnd);
 
   const clientRes = await pool.query(
     `SELECT COALESCE(SUM(cost_usd), 0) as total FROM api_calls
@@ -96,10 +103,15 @@ async function runReconciliation() {
     const periodStart = new Date(periodEnd);
     periodStart.setDate(periodStart.getDate() - 1);
 
+    // Filtered in SQL, not in the loop: a provider with no billing API must
+    // never be picked up at all. Previously every admin credential was fetched
+    // and non-Anthropic ones fell through to the OpenAI branch.
     const creds = await pool.query(
-      `SELECT DISTINCT ON (org_id, provider) org_id, provider, api_key_encrypted
-       FROM provider_credentials WHERE key_type = 'admin'
-       ORDER BY org_id, provider, created_at DESC`
+      `SELECT DISTINCT ON (org_id, provider) org_id, provider, api_key_encrypted, provider_account_id
+       FROM provider_credentials
+       WHERE key_type = 'admin' AND provider = ANY($1)
+       ORDER BY org_id, provider, created_at DESC`,
+      [reconcilableProviders()]
     );
 
     for (const cred of creds.rows) {
@@ -107,9 +119,19 @@ async function runReconciliation() {
       let result = { providerComputedUsd: 0, clientReportedUsd: 0, deviationPct: 0, source: null };
       let status = 'ok', errorMessage = null;
 
+      // A provider that needs an account id but has none isn't an error, it's
+      // an unfinished setup — indistinguishable from "not configured" to the
+      // user. Writing an `error` row here would put a false alarm in the
+      // notification bell; the signal the user should see is is_valid=false on
+      // the credential itself, which POST /api/credentials/:id/test sets.
+      if (requiresAccountId(provider) && !cred.provider_account_id) {
+        console.warn(`[reconciliation] ${provider} org ${orgId} skipped: missing provider_account_id`);
+        continue;
+      }
+
       try {
-        const apiKey = decrypt(cred.api_key_encrypted);
-        result = await reconcileOrgProvider(orgId, provider, apiKey, periodStart, periodEnd);
+        const credential = { apiKey: decrypt(cred.api_key_encrypted), accountId: cred.provider_account_id };
+        result = await reconcileOrgProvider(orgId, provider, credential, periodStart, periodEnd);
       } catch (err) {
         status = 'error';
         errorMessage = err.message;
