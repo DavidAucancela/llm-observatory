@@ -2,34 +2,12 @@ const express = require('express');
 const pool = require('../db/pool');
 const { decrypt } = require('../db/crypto');
 const { requireAdmin } = require('../middleware/auth');
-const { fetchAnthropicUsage, fetchOpenAIUsage, anthropicCacheCreationTokens } = require('../services/providerUsage');
+const { anthropicCacheCreationTokens } = require('../services/providerUsage');
 const { costForProviderUsage } = require('../services/pricingBridge');
+const { SYNC_PROVIDERS, syncableProviders } = require('../services/providerRegistry');
+const { requiresAccountId, ADMIN_KEY_HELP, PROVIDER_LABELS } = require('../constants/providers');
 
 const router = express.Router();
-
-async function syncAnthropic(adminKey, days) {
-  const endDate   = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - days);
-  const buckets = await fetchAnthropicUsage(adminKey, startDate, endDate);
-  return {
-    buckets,
-    startStr: startDate.toISOString().split('.')[0] + 'Z',
-    endStr:   endDate.toISOString().split('.')[0] + 'Z',
-  };
-}
-
-async function syncOpenAI(apiKey, days) {
-  const endDate   = new Date();
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - days);
-  const buckets = await fetchOpenAIUsage(apiKey, startDate, endDate);
-  return {
-    buckets,
-    startTs: Math.floor(startDate.getTime() / 1000),
-    endTs:   Math.floor(endDate.getTime() / 1000),
-  };
-}
 
 // Splits one provider usage result-row into the token categories the pricing
 // bridge understands. OpenAI's usage API has no separate cache-write concept and
@@ -51,6 +29,40 @@ function extractBucketTokens(provider, result) {
   };
 }
 
+// What the org's own LIVE rows (not sync, not ping, not judge) already booked
+// for a given slice — either one model on one day, or (when `model` is
+// omitted) the whole day across every model, used by the clamp below.
+async function liveTotalsQuery(client, orgId, provider, model, dayStartISO, dayEndISO) {
+  const modelFilter = model != null ? 'AND model = $5' : '';
+  const params = model != null
+    ? [orgId, provider, dayStartISO, dayEndISO, model]
+    : [orgId, provider, dayStartISO, dayEndISO];
+  const res = await client.query(
+    `SELECT COALESCE(SUM(cost_usd), 0)           AS cost,
+            COALESCE(SUM(input_tokens), 0)       AS input_tokens,
+            COALESCE(SUM(output_tokens), 0)      AS output_tokens,
+            COALESCE(SUM(cache_read_tokens), 0)  AS cache_read_tokens,
+            COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens
+     FROM api_calls
+     WHERE org_id = $1 AND provider = $2
+       AND timestamp >= $3 AND timestamp < $4
+       ${modelFilter}
+       AND (prompt_preview IS NULL OR (
+             prompt_preview NOT LIKE 'sync:%'
+         AND prompt_preview NOT LIKE 'test:%'
+         AND prompt_preview <> 'eval:judge'))`,
+    params
+  );
+  const row = res.rows[0];
+  return {
+    cost:        parseFloat(row.cost) || 0,
+    input:       parseInt(row.input_tokens, 10) || 0,
+    output:      parseInt(row.output_tokens, 10) || 0,
+    cacheRead:   parseInt(row.cache_read_tokens, 10) || 0,
+    cacheWrite:  parseInt(row.cache_write_tokens, 10) || 0,
+  };
+}
+
 // Imports provider daily-aggregate usage as reconciling `sync:<provider>` rows,
 // but only for the SHORTFALL not already covered by the org's own live SDK rows
 // for that provider+model+day. Without this, an org that runs the SDK *and*
@@ -60,7 +72,14 @@ function extractBucketTokens(provider, result) {
 // recomputed inside one transaction, so re-running never stacks rows and the
 // recorded total converges toward (never exceeds) the provider's own figure as
 // live rows accumulate.
-async function importBuckets(buckets, provider, orgId, windowStartISO, windowEndISO) {
+//
+// `clampDayTotal` (see providerRegistry.js) exists for providers whose usage
+// API can report a different model id than the SDK sent for the same
+// underlying model (Grok: "grok-4-0709" from xAI vs "grok-4.6" from the SDK).
+// Without it, a per-(model,day) gap can't find the live row it should offset
+// against and double-counts the day. With it, gaps are capped so the day's
+// total inserted spend never exceeds `dayBucketTotal - dayLiveTotal`.
+async function importBuckets(buckets, provider, orgId, windowStartISO, windowEndISO, { clampDayTotal = false } = {}) {
   const tag    = `sync:${provider}`;
 
   // A healthy usage-API response always has one bucket per day in the range
@@ -86,48 +105,65 @@ async function importBuckets(buckets, provider, orgId, windowStartISO, windowEnd
         || new Date(bucket.start_time * 1000).toISOString();
       const dayEndISO = new Date(Date.parse(dayStartISO) + 86400_000).toISOString();
 
+      // Gaps computed per (model, day) below; collected here so the clamp can
+      // rescale them after seeing every model's gap for the day.
+      const dayGaps = []; // { model, gap, resInput, resOutput, resCacheRead, resCacheWrite }
+      let dayBucketCostSum = 0;
+
       for (const result of (bucket.results || [])) {
         const model = result.model || 'unknown';
         const tok   = extractBucketTokens(provider, result);
         const bucketInput = tok.uncachedInput + tok.cacheReadInput + tok.cacheCreationInput;
-        if (bucketInput + tok.output === 0) continue;
 
-        const bucketCost = costForProviderUsage(provider, model, tok);
+        // `cost_usd` on the result means the provider gave us a billed dollar
+        // figure directly (Grok) rather than token counts to price ourselves
+        // (Anthropic/OpenAI). Only skip a token-priced row with nothing in it;
+        // a cost-priced row can be legitimately zero-token and still owe money.
+        const bucketCost = result.cost_usd != null
+          ? Number(result.cost_usd)
+          : costForProviderUsage(provider, model, tok);
+        if (bucketInput + tok.output === 0 && !(bucketCost > 0)) continue;
         if (bucketCost <= 0) continue;
+        dayBucketCostSum += bucketCost;
 
-        // What the org's own LIVE rows (not sync, not ping, not judge) already
-        // booked for this provider+model+day.
-        const live = await client.query(
-          `SELECT COALESCE(SUM(cost_usd), 0)           AS cost,
-                  COALESCE(SUM(input_tokens), 0)       AS input_tokens,
-                  COALESCE(SUM(output_tokens), 0)      AS output_tokens,
-                  COALESCE(SUM(cache_read_tokens), 0)  AS cache_read_tokens,
-                  COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens
-           FROM api_calls
-           WHERE org_id = $1 AND provider = $2 AND model = $3
-             AND timestamp >= $4 AND timestamp < $5
-             AND (prompt_preview IS NULL OR (
-                   prompt_preview NOT LIKE 'sync:%'
-               AND prompt_preview NOT LIKE 'test:%'
-               AND prompt_preview <> 'eval:judge'))`,
-          [orgId, provider, model, dayStartISO, dayEndISO]
-        );
-        const liveCost       = parseFloat(live.rows[0].cost) || 0;
-        const liveInput      = parseInt(live.rows[0].input_tokens, 10) || 0;
-        const liveOutput     = parseInt(live.rows[0].output_tokens, 10) || 0;
-        const liveCacheRead  = parseInt(live.rows[0].cache_read_tokens, 10) || 0;
-        const liveCacheWrite = parseInt(live.rows[0].cache_write_tokens, 10) || 0;
+        const live = await liveTotalsQuery(client, orgId, provider, model, dayStartISO, dayEndISO);
 
-        const gap = bucketCost - liveCost;
+        const gap = bucketCost - live.cost;
         if (gap <= 0) continue; // live rows already cover this bucket
 
         // Residual token counts on the reconciling row are an approximation
         // (bucket minus what live rows reported, floored at 0). The `gap` dollar
         // figure is the authoritative number.
-        const resInput      = Math.max(0, bucketInput - liveInput);
-        const resOutput     = Math.max(0, tok.output - liveOutput);
-        const resCacheRead  = Math.max(0, tok.cacheReadInput - liveCacheRead);
-        const resCacheWrite = Math.max(0, tok.cacheCreationInput - liveCacheWrite);
+        dayGaps.push({
+          model,
+          gap,
+          resInput:      Math.max(0, bucketInput - live.input),
+          resOutput:     Math.max(0, tok.output - live.output),
+          resCacheRead:  Math.max(0, tok.cacheReadInput - live.cacheRead),
+          resCacheWrite: Math.max(0, tok.cacheCreationInput - live.cacheWrite),
+        });
+      }
+
+      if (!dayGaps.length) continue;
+
+      // Without the clamp, each model's gap stands as computed above — the
+      // Anthropic/OpenAI path, unchanged.
+      let scale = 1;
+      if (clampDayTotal) {
+        const dayLive = await liveTotalsQuery(client, orgId, provider, null, dayStartISO, dayEndISO);
+        const dayGapSum = dayGaps.reduce((s, g) => s + g.gap, 0);
+        const allowedDayGap = Math.max(0, dayBucketCostSum - dayLive.cost);
+        // Scale every model's gap down proportionally so the day's total
+        // never exceeds what the provider actually billed that day — the
+        // invariant a model-id mismatch would otherwise break.
+        scale = dayGapSum > 0 ? Math.min(1, allowedDayGap / dayGapSum) : 0;
+      }
+
+      for (const g of dayGaps) {
+        const gap = g.gap * scale;
+        if (gap <= 0) continue;
+        const resInput  = Math.round(g.resInput  * scale);
+        const resOutput = Math.round(g.resOutput * scale);
 
         await client.query(
           `INSERT INTO api_calls
@@ -136,9 +172,9 @@ async function importBuckets(buckets, provider, orgId, windowStartISO, windowEnd
               cache_read_tokens, cache_write_tokens,
               latency_ms, status_code, prompt_preview, api_key_hint, cost_confidence)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,200,$11,$11,'known')`,
-          [orgId, dayStartISO, provider, model,
+          [orgId, dayStartISO, provider, g.model,
            resInput, resOutput, resInput + resOutput, gap,
-           resCacheRead, resCacheWrite, tag]
+           Math.round(g.resCacheRead * scale), Math.round(g.resCacheWrite * scale), tag]
         );
         imported++;
       }
@@ -160,12 +196,13 @@ router.post('/:provider', requireAdmin, async (req, res, next) => {
   const { orgId }    = req.user;
   const days         = parseInt(req.query.days) || 30;
 
-  if (!['anthropic', 'openai'].includes(provider)) {
-    return res.status(400).json({ error: 'Proveedor no soportado. Usa: anthropic, openai' });
+  const syncEntry = SYNC_PROVIDERS[provider];
+  if (!syncEntry) {
+    return res.status(400).json({ error: `Proveedor no soportado. Usa: ${syncableProviders().join(', ')}` });
   }
 
   const credRow = await pool.query(
-    `SELECT api_key_encrypted FROM provider_credentials
+    `SELECT api_key_encrypted, provider_account_id FROM provider_credentials
      WHERE org_id = $1 AND provider = $2 AND key_type = 'admin'
      ORDER BY created_at DESC LIMIT 1`,
     [orgId, provider]
@@ -174,13 +211,18 @@ router.post('/:provider', requireAdmin, async (req, res, next) => {
   if (!credRow.rows.length) {
     return res.status(400).json({
       error: `Admin key not configured for this provider. Add it in Settings.`,
-      detail: provider === 'anthropic'
-        ? 'Para Anthropic: genera una Admin Key en console.anthropic.com > Settings > Admin Keys'
-        : 'Para OpenAI: usa una key con permisos de organización',
+      detail: ADMIN_KEY_HELP[provider] || `Configura una admin key de ${PROVIDER_LABELS[provider] || provider}`,
     });
   }
 
-  const apiKey = decrypt(credRow.rows[0].api_key_encrypted);
+  const { api_key_encrypted, provider_account_id } = credRow.rows[0];
+  if (requiresAccountId(provider) && !provider_account_id) {
+    return res.status(400).json({
+      error: 'Falta el Team ID en la credencial admin.',
+      detail: `Edita la credencial en Ajustes y agrega el Team ID. ${ADMIN_KEY_HELP[provider] || ''}`,
+    });
+  }
+  const cred = { apiKey: decrypt(api_key_encrypted), accountId: provider_account_id };
 
   const logRow = await pool.query(
     `INSERT INTO sync_logs (org_id, provider, status) VALUES ($1, $2, 'running') RETURNING id`,
@@ -192,24 +234,19 @@ router.post('/:provider', requireAdmin, async (req, res, next) => {
 
   ;(async () => {
     try {
-      let buckets, startStr, endStr;
-      if (provider === 'anthropic') {
-        ({ buckets, startStr, endStr } = await syncAnthropic(apiKey, days));
-      } else {
-        const result = await syncOpenAI(apiKey, days);
-        buckets  = result.buckets;
-        startStr = new Date(result.startTs * 1000).toISOString();
-        endStr   = new Date(result.endTs   * 1000).toISOString();
-      }
+      const endDate   = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
 
-      const imported = await importBuckets(buckets, provider, orgId, startStr, endStr);
+      const { buckets, startISO, endISO } = await syncEntry.fetchBuckets(cred, startDate, endDate);
+      const imported = await importBuckets(buckets, provider, orgId, startISO, endISO, { clampDayTotal: syncEntry.clampDayTotal });
 
       await pool.query(
         `UPDATE sync_logs
          SET status = 'success', completed_at = NOW(), records_synced = $1,
              date_range_start = $2, date_range_end = $3
          WHERE id = $4`,
-        [imported, startStr, endStr, syncId]
+        [imported, startISO, endISO, syncId]
       );
       console.log(`[sync] ${provider} complete: ${imported} records imported`);
     } catch (err) {
@@ -226,8 +263,8 @@ router.post('/:provider', requireAdmin, async (req, res, next) => {
 router.delete('/:provider/data', requireAdmin, async (req, res, next) => {
   const { provider } = req.params;
   const { orgId }    = req.user;
-  if (!['anthropic', 'openai'].includes(provider)) {
-    return res.status(400).json({ error: 'Proveedor no soportado' });
+  if (!SYNC_PROVIDERS[provider]) {
+    return res.status(400).json({ error: `Proveedor no soportado. Usa: ${syncableProviders().join(', ')}` });
   }
   try {
     const result = await pool.query(

@@ -5,8 +5,10 @@ import ModelCostBreakdown from '../components/ModelCostBreakdown';
 import TopBar from '../components/TopBar';
 import { formatCost, fmtLatency, fmtCompact } from '../utils/fmt';
 import { useApi } from '../hooks/useApi';
+import { useRangeFilter } from '../hooks/useRangeFilter';
+import { RANGE_PRESETS, buildRangeParams, rangeLabel } from '../utils/dateRange';
 
-const RANGES = ['24h', '7d', '30d', '90d'];
+const RANGES = RANGE_PRESETS;
 
 const PROVIDER_COLORS = { anthropic: '#D97706', openai: '#059669', gemini: '#4285F4', grok: '#3F3F46', kimi: '#0D9488' };
 
@@ -126,24 +128,23 @@ function EfficiencyScatter({ models }) {
 }
 
 export default function Models({ darkMode, onToggleDarkMode }) {
-  const [range, setRange] = useState(() => localStorage.getItem('obs-range') || '7d');
+  const { range, setRange, customRange, setCustomRange } = useRangeFilter('7d');
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const { apiFetch } = useApi();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const rangeParams = buildRangeParams(range, customRange);
+  const rangeQuery  = new URLSearchParams(rangeParams).toString();
 
   useEffect(() => {
     setLoading(true);
-    apiFetch(`/api/metrics/summary?range=${range}`)
+    apiFetch(`/api/metrics/summary?${rangeQuery}`)
       .then(r => r.json())
       .then(d => { setSummary(d); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [range]);
+  }, [rangeQuery]);
 
-  const handleRangeChange = (r) => {
-    setRange(r);
-    localStorage.setItem('obs-range', r);
-  };
+  const rangeLabelText = rangeLabel(range, customRange, t, i18n.language);
 
   const allModels = (summary?.by_model || []).map(parseModel);
 
@@ -153,7 +154,9 @@ export default function Models({ darkMode, onToggleDarkMode }) {
         title={t('activity.modelsTab')}
         ranges={RANGES}
         range={range}
-        onRangeChange={handleRangeChange}
+        onRangeChange={setRange}
+        customRange={customRange}
+        onCustomRangeApply={setCustomRange}
         darkMode={darkMode}
         onToggleDarkMode={onToggleDarkMode}
       />
@@ -169,7 +172,7 @@ export default function Models({ darkMode, onToggleDarkMode }) {
           <>
             <EfficiencyScatter models={allModels} />
 
-            <ModelCostBreakdown models={allModels} range={range} />
+            <ModelCostBreakdown models={allModels} range={rangeLabelText} />
 
             <div className="obs-section-label" style={{ marginBottom: 8 }}>{t('activity.allModels')}</div>
             <div className="obs-table-wrap">

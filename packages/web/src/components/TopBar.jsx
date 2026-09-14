@@ -4,6 +4,10 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthProvider';
 import NotificationBell from './NotificationBell';
 import { useSidebar } from '../contexts/SidebarContext';
+import { fmtRangeShort } from '../utils/fmt';
+import { RANGE_LABEL_I18N_KEYS } from '../utils/dateRange';
+
+const TODAY = new Date().toISOString().slice(0, 10);
 
 function IconHamburger() {
   return (
@@ -147,8 +151,37 @@ function AccountMenu({ darkMode, onToggleDarkMode }) {
 // filter, notifications and account (language now lives inside the account
 // menu, see AccountMenu) — replaces the old mix of a per-page header plus
 // globally fixed theme toggle / notification bell.
-export default function TopBar({ title, ranges, range, onRangeChange, darkMode, onToggleDarkMode }) {
+export default function TopBar({
+  title, ranges, range, onRangeChange,
+  customRange, onCustomRangeApply,
+  darkMode, onToggleDarkMode,
+}) {
   const { openSidebar } = useSidebar();
+  const { t, i18n } = useTranslation();
+  const [customOpen, setCustomOpen] = useState(false);
+  const [draftStart, setDraftStart] = useState('');
+  const [draftEnd, setDraftEnd] = useState('');
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!customOpen) return;
+    const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setCustomOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [customOpen]);
+
+  const openCustomPanel = () => {
+    // Seed the draft from whatever custom range is already active (or blank
+    // for a first-time pick) every time the panel opens, not just on mount.
+    setDraftStart(customRange?.start || '');
+    setDraftEnd(customRange?.end || '');
+    setCustomOpen(o => !o);
+  };
+
+  const canApply = draftStart && draftEnd && draftStart <= draftEnd;
+  const customLabel = range === 'custom' && customRange?.start && customRange?.end
+    ? fmtRangeShort(customRange.start, customRange.end, i18n.language)
+    : t('topbar.rangeCustom');
 
   return (
     <div className="obs-header">
@@ -165,14 +198,50 @@ export default function TopBar({ title, ranges, range, onRangeChange, darkMode, 
       {ranges && (
         <>
           <div className="obs-divider-v" />
-          <div className="obs-range-picker">
-            {ranges.map(r => (
-              <button
-                key={r}
-                className={`obs-range-btn${range === r ? ' active' : ''}`}
-                onClick={() => onRangeChange(r)}
-              >{r}</button>
-            ))}
+          <div className="obs-range-wrap" ref={wrapRef}>
+            <div className="obs-range-picker">
+              {ranges.map(r => (
+                <button
+                  key={r}
+                  className={`obs-range-btn${range === r ? ' active' : ''}`}
+                  onClick={() => { setCustomOpen(false); onRangeChange(r); }}
+                >{t(RANGE_LABEL_I18N_KEYS[r] || r)}</button>
+              ))}
+              {onCustomRangeApply && (
+                <button
+                  type="button"
+                  className={`obs-range-btn${range === 'custom' ? ' active' : ''}`}
+                  onClick={openCustomPanel}
+                >{customLabel}</button>
+              )}
+            </div>
+
+            {customOpen && (
+              <div className="obs-range-custom-panel">
+                <div className="obs-field">
+                  <label htmlFor="range-from">{t('topbar.rangeFrom')}</label>
+                  <input
+                    id="range-from" type="date" className="obs-input"
+                    value={draftStart} max={draftEnd || TODAY}
+                    onChange={e => setDraftStart(e.target.value)}
+                  />
+                </div>
+                <div className="obs-field">
+                  <label htmlFor="range-to">{t('topbar.rangeTo')}</label>
+                  <input
+                    id="range-to" type="date" className="obs-input"
+                    value={draftEnd} min={draftStart || undefined} max={TODAY}
+                    onChange={e => setDraftEnd(e.target.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="obs-btn obs-btn-primary"
+                  disabled={!canApply}
+                  onClick={() => { onCustomRangeApply({ start: draftStart, end: draftEnd }); setCustomOpen(false); }}
+                >{t('topbar.rangeApply')}</button>
+              </div>
+            )}
           </div>
         </>
       )}

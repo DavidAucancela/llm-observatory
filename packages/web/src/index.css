@@ -510,6 +510,23 @@ body {
 .obs-range-btn.active { background: var(--accent); color: var(--d-page, #fff); font-weight: 600; }
 .obs-range-btn + .obs-range-btn { border-left: 1px solid var(--border); }
 
+.obs-range-wrap { position: relative; }
+
+.obs-range-custom-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 240px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: var(--shadow-md);
+  z-index: 210;
+  display: flex; flex-direction: column; gap: 10px;
+}
+
 .obs-header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
 /* ── Top bar controls (language / notifications / account) ── */

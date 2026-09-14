@@ -11,4 +11,21 @@ function getRangeIntervals(range) {
   };
 }
 
-module.exports = { getRangeIntervals };
+// Shared "give me the WHERE clause for this time window" used by the simpler
+// range-only endpoints (tag-keys/tag-values/tag-breakdown/project-breakdown,
+// balances) — appends 1 or 2 params to `params` in place and returns the SQL
+// fragment referencing them. Custom start/end (the dashboard's date-range
+// picker) takes priority over the range preset, same convention as
+// GET /api/metrics and /summary. Not used by /summary itself, which also
+// needs the previous-period window and has its own inline version of this.
+function appendTimeWindow(params, { range, start, end }, column = 'timestamp') {
+  if (start && end) {
+    params.push(start, end);
+    const endIdx = params.length;
+    return `${column} >= $${endIdx - 1} AND ${column} <= $${endIdx}`;
+  }
+  const { interval } = getRangeIntervals(range);
+  return `${column} > NOW() - INTERVAL '${interval}'`;
+}
+
+module.exports = { getRangeIntervals, appendTimeWindow };

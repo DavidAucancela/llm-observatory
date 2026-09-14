@@ -30,6 +30,15 @@
     "collapseSidebar": "Contraer sidebar",
     "language": "Idioma"
   },
+  "topbar": {
+    "range24h": "24 h",
+    "range7d": "7 días",
+    "range30d": "1 mes",
+    "rangeCustom": "Personalizado",
+    "rangeFrom": "Desde",
+    "rangeTo": "Hasta",
+    "rangeApply": "Aplicar"
+  },
   "common": {
     "save": "Guardar",
     "saving": "Guardando…",
@@ -321,7 +330,7 @@
     "rangeLabel24h": "Últimas 24 horas",
     "rangeLabel7d": "Últimos 7 días",
     "rangeLabel30d": "Últimos 30 días",
-    "rangeLabel90d": "Últimos 90 días",
+    "rangeLabelCustom": "{{start}} – {{end}}",
     "noKeysTitle": "No hay claves API configuradas",
     "noKeysSub": "Ve a Ajustes → Claves para comenzar",
     "addKeyButton": "Agregar clave API",

@@ -77,7 +77,7 @@ function DashboardMockup() {
           <div className="lp-mockup-rangebar">
             <span className="lp-mockup-rangebar-title">{t('landing.mockOverview')}</span>
             <div className="lp-mockup-ranges">
-              {['24h', '7d', '30d', '90d'].map(r => (
+              {['24h', '7d', '30d'].map(r => (
                 <span key={r} className={`lp-mockup-range${r === '7d' ? ' active' : ''}`}>{r}</span>
               ))}
             </div>

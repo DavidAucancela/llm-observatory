@@ -34,6 +34,24 @@ export function fmtCompact(n) {
   return Math.round(v).toString();
 }
 
+/**
+ * "12 Aug" — short single date, locale-aware. `date` is a YYYY-MM-DD string
+ * (native date-input value); the `T00:00:00` suffix forces local-time parsing
+ * so the label can't drift a day off in negative-UTC-offset timezones (a bare
+ * "2026-08-12" parses as UTC midnight).
+ */
+export function fmtDateShort(date, lang) {
+  if (!date) return '';
+  const locale = lang === 'es' ? 'es-ES' : 'en-US';
+  return new Date(`${date}T00:00:00`).toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+}
+
+/** "12 Aug – 20 Aug" — short label for a custom date-range picker. */
+export function fmtRangeShort(start, end, lang) {
+  if (!start || !end) return '—';
+  return `${fmtDateShort(start, lang)} – ${fmtDateShort(end, lang)}`;
+}
+
 /** "845ms" under a second, "1.52s" from there up */
 export function fmtLatency(ms) {
   const n = Math.round(ms ?? 0);

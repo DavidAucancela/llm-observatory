@@ -7,7 +7,9 @@ import ChartToolbar, { ChartHintBanner } from '../components/ChartToolbar';
 import TopBar from '../components/TopBar';
 import { useSocket } from '../hooks/useSocket';
 import { useApi } from '../hooks/useApi';
-import { formatCost, fmtLatency } from '../utils/fmt';
+import { useRangeFilter } from '../hooks/useRangeFilter';
+import { formatCost, fmtLatency, fmtDateShort } from '../utils/fmt';
+import { RANGE_PRESETS, buildRangeParams } from '../utils/dateRange';
 import { buildGrid } from '../utils/metricGrid';
 import { PROVIDER_COLORS } from '../utils/providerColors';
 import { shortModelName } from '../utils/modelAlias';
@@ -245,16 +247,17 @@ function ErrorBreakdown({ breakdown, loading }) {
 
 // ── Tag breakdown ─────────────────────────────────────────────────────────────
 
-function TagBreakdown({ range, className = '' }) {
+function TagBreakdown({ rangeParams, className = '' }) {
   const [tagKeys, setTagKeys]   = useState([]);
   const [tagKey, setTagKey]     = useState('');
   const [data, setData]         = useState([]);
   const [loading, setLoading]   = useState(false);
   const { apiFetch } = useApi();
   const { t } = useTranslation();
+  const rangeKey = new URLSearchParams(rangeParams).toString();
 
   useEffect(() => {
-    apiFetch(`/api/metrics/tag-keys?range=${range}`)
+    apiFetch(`/api/metrics/tag-keys?${rangeKey}`)
       .then(r => r.json())
       .then(d => {
         const keys = d.keys || [];
@@ -262,16 +265,16 @@ function TagBreakdown({ range, className = '' }) {
         if (keys.length && !tagKey) setTagKey(keys[0]);
       })
       .catch(() => {});
-  }, [range]);
+  }, [rangeKey]);
 
   useEffect(() => {
     if (!tagKey) return;
     setLoading(true);
-    apiFetch(`/api/metrics/tag-breakdown?key=${encodeURIComponent(tagKey)}&range=${range}`)
+    apiFetch(`/api/metrics/tag-breakdown?key=${encodeURIComponent(tagKey)}&${rangeKey}`)
       .then(r => r.json())
       .then(d => { setData(d.data || []); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [tagKey, range]);
+  }, [tagKey, rangeKey]);
 
   if (!tagKeys.length) return null;
 
@@ -320,18 +323,22 @@ const RANGE_LABEL_KEY = {
   '24h': 'dashboard.rangeLabel24h',
   '7d':  'dashboard.rangeLabel7d',
   '30d': 'dashboard.rangeLabel30d',
-  '90d': 'dashboard.rangeLabel90d',
 };
 
-function RangeSpend({ byProvider, totalCost, prevTotalCost, range, configuredProviders, loading, className = '' }) {
-  const { t } = useTranslation();
+function RangeSpend({ byProvider, totalCost, prevTotalCost, range, customRange, configuredProviders, loading, className = '' }) {
+  const { t, i18n } = useTranslation();
   if (loading) return <div className="obs-skeleton" style={{ height: 120, borderRadius: 6 }} />;
 
   const items = (byProvider || []).filter(p => configuredProviders.includes(p.provider));
   if (!items.length) return null;
 
   const total = parseFloat(totalCost || 0);
-  const rangeLabelKey = RANGE_LABEL_KEY[range] || RANGE_LABEL_KEY['7d'];
+  const rangeLabel = range === 'custom'
+    ? t('dashboard.rangeLabelCustom', {
+        start: fmtDateShort(customRange?.start, i18n.language),
+        end:   fmtDateShort(customRange?.end, i18n.language),
+      })
+    : t(RANGE_LABEL_KEY[range] || RANGE_LABEL_KEY['7d']);
 
   return (
     <div className={`obs-card dash-sub-card dash-range-spend${className ? ` ${className}` : ''}`}>
@@ -339,7 +346,7 @@ function RangeSpend({ byProvider, totalCost, prevTotalCost, range, configuredPro
         <div className="obs-section-label">{t('dashboard.spentThisRange')}</div>
         <Delta value={calcDelta(totalCost, prevTotalCost)} inverse />
       </div>
-      <div style={{ fontSize: 10, color: 'var(--faint)', marginBottom: 14 }}>{t(rangeLabelKey)}</div>
+      <div style={{ fontSize: 10, color: 'var(--faint)', marginBottom: 14 }}>{rangeLabel}</div>
       <div className="dash-scroll dash-range-spend-grid" style={{
         display: 'grid',
         gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))`,
@@ -382,10 +389,10 @@ function RangeSpend({ byProvider, totalCost, prevTotalCost, range, configuredPro
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-const RANGES = ['24h', '7d', '30d', '90d'];
+const RANGES = RANGE_PRESETS;
 
 export default function Dashboard({ darkMode, onToggleDarkMode }) {
-  const [range, setRange]         = useState(() => localStorage.getItem('obs-range') || '7d');
+  const { range, setRange, customRange, setCustomRange } = useRangeFilter('7d');
   const [summary, setSummary]     = useState(null);
   const [loading, setLoading]     = useState(true);
   const [syncing, setSyncing]     = useState(false);
@@ -423,12 +430,14 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   const { on, off } = useSocket();
   const { apiFetch }  = useApi();
   const { t, i18n } = useTranslation();
+  const rangeParams = useMemo(() => buildRangeParams(range, customRange), [range, customRange]);
+  const rangeQuery  = useMemo(() => new URLSearchParams(rangeParams).toString(), [rangeParams]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
       const [sumRes, credRes, reconRes] = await Promise.all([
-        apiFetch(`/api/metrics/summary?range=${range}`),
+        apiFetch(`/api/metrics/summary?${rangeQuery}`),
         apiFetch(`/api/credentials`),
         apiFetch(`/api/reconciliation/latest`),
       ]);
@@ -441,7 +450,7 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
       setReconciliation((await reconRes.json()).latest || []);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
-  }, [range]);
+  }, [rangeQuery]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -620,7 +629,9 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
         title={t('dashboard.title')}
         ranges={RANGES}
         range={range}
-        onRangeChange={(r) => { setRange(r); localStorage.setItem('obs-range', r); }}
+        onRangeChange={setRange}
+        customRange={customRange}
+        onCustomRangeApply={setCustomRange}
         darkMode={darkMode}
         onToggleDarkMode={onToggleDarkMode}
       />
@@ -674,7 +685,6 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
                   metric={activeMetric}
                   xLabels={xLabels}
                   loading={loading}
-                  range={range}
                   hiddenModels={hiddenModels}
                   modelToProvider={modelToProvider}
                   otherModels={otherModels}
@@ -779,6 +789,7 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
           totalCost={s?.total_cost_usd}
           prevTotalCost={prev?.total_cost_usd}
           range={range}
+          customRange={customRange}
           configuredProviders={configuredProviders}
           loading={loading}
           className={mobileTab === 'overview' ? '' : 'dash-mobile-tab-hidden'}
@@ -822,7 +833,7 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
             </div>
           </div>
 
-          <TagBreakdown range={range} className={mobileTab === 'more' ? '' : 'dash-mobile-tab-hidden'} />
+          <TagBreakdown rangeParams={rangeParams} className={mobileTab === 'more' ? '' : 'dash-mobile-tab-hidden'} />
         </div>
       </div>
     </main>

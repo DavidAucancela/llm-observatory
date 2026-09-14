@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import ProviderBadge from '../components/ProviderBadge';
 import TopBar from '../components/TopBar';
 import { useApi } from '../hooks/useApi';
+import { useRangeFilter } from '../hooks/useRangeFilter';
+import { RANGE_PRESETS, buildRangeParams, rangeLabel } from '../utils/dateRange';
 import { fmtDateTime, formatCost } from '../utils/fmt';
 
 // ── Tab intro paragraph ───────────────────────────────────────
@@ -37,16 +39,17 @@ function OverviewCard({ label, value, accentColor, active, onClick }) {
   );
 }
 
-function FinanceOverview({ range, tab, onTabChange, configuredProviders, refreshTick }) {
+function FinanceOverview({ rangeParams, rangeLabel, tab, onTabChange, configuredProviders, refreshTick }) {
   const [balances, setBalances] = useState(null);
   const [budgets, setBudgets]   = useState(null);
   const { apiFetch } = useApi();
   const { t } = useTranslation();
+  const rangeQuery = new URLSearchParams(rangeParams).toString();
 
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      apiFetch(`/api/balances?range=${range}`).then(r => r.json()),
+      apiFetch(`/api/balances?${rangeQuery}`).then(r => r.json()),
       apiFetch(`/api/budgets`).then(r => r.json()),
     ]).then(([bal, bud]) => {
       if (cancelled) return;
@@ -54,7 +57,7 @@ function FinanceOverview({ range, tab, onTabChange, configuredProviders, refresh
       setBudgets(bud.data || []);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [range, refreshTick, apiFetch]);
+  }, [rangeQuery, refreshTick, apiFetch]);
 
   const providers = (balances?.providers || []).filter(p => !configuredProviders.length || configuredProviders.includes(p.provider));
   const totalRemaining = providers.reduce((s, p) => s + (p.remaining || 0), 0);
@@ -69,7 +72,7 @@ function FinanceOverview({ range, tab, onTabChange, configuredProviders, refresh
     <div className="kpi-strip" style={{ gridTemplateColumns: 'repeat(4, 1fr)', margin: '16px 0 18px' }}>
       <OverviewCard label={t('finance.kpiRemaining')} value={loading ? null : formatCost(totalRemaining)}
         accentColor="var(--accent)" active={tab === 'balances'} onClick={() => onTabChange('balances')} />
-      <OverviewCard label={t('finance.kpiSpent', { range })} value={loading ? null : formatCost(totalSpent)}
+      <OverviewCard label={t('finance.kpiSpent', { range: rangeLabel })} value={loading ? null : formatCost(totalSpent)}
         accentColor="var(--cost-color)" active={tab === 'balances'} onClick={() => onTabChange('balances')} />
       <OverviewCard label={t('finance.kpiBudgets')} value={loading ? null : String(budgetList.length)}
         accentColor="var(--tokens-color)" active={tab === 'budgets'} onClick={() => onTabChange('budgets')} />
@@ -80,7 +83,7 @@ function FinanceOverview({ range, tab, onTabChange, configuredProviders, refresh
 }
 
 // ── Balances tab ──────────────────────────────────────────────
-function BalancesTab({ range, configuredProviders, onChanged }) {
+function BalancesTab({ rangeParams, configuredProviders, onChanged }) {
   const [data, setData]         = useState(null);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(null);
@@ -89,18 +92,19 @@ function BalancesTab({ range, configuredProviders, onChanged }) {
   const [submitting, setSubmitting] = useState(false);
   const { apiFetch } = useApi();
   const { t } = useTranslation();
+  const rangeQuery = new URLSearchParams(rangeParams).toString();
 
   const fetchData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch(`/api/balances?range=${range}`);
+      const res = await apiFetch(`/api/balances?${rangeQuery}`);
       setData(await res.json());
     } catch (err) { console.error(err); setError(t('finance.loadError') || 'Failed to load balances'); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, [range]);
+  useEffect(() => { fetchData(); }, [rangeQuery]);
 
   useEffect(() => {
     if (configuredProviders.length && !configuredProviders.includes(form.provider)) {
@@ -406,13 +410,13 @@ function BudgetsTab({ onChanged }) {
   );
 }
 
-const RANGES = ['24h', '7d', '30d', '90d'];
+const RANGES = RANGE_PRESETS;
 
 // ── Page ──────────────────────────────────────────────────────
 export default function Finance({ darkMode, onToggleDarkMode }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState(searchParams.get('tab') === 'budgets' ? 'budgets' : 'balances');
-  const [range, setRange] = useState(() => localStorage.getItem('obs-range') || '7d');
+  const { range, setRange, customRange, setCustomRange } = useRangeFilter('7d');
   const [configuredProviders, setConfiguredProviders] = useState([]);
   // Balance tracking (GET/POST /api/balances) only supports anthropic/openai —
   // no admin-key concept exists for gemini/grok/kimi — so the "add balance"
@@ -421,7 +425,9 @@ export default function Finance({ darkMode, onToggleDarkMode }) {
   const [refreshTick, setRefreshTick] = useState(0);
   const bumpRefresh = () => setRefreshTick(n => n + 1);
   const { apiFetch } = useApi();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const rangeParams = buildRangeParams(range, customRange);
+  const rangeLabelText = rangeLabel(range, customRange, t, i18n.language);
 
   const handleTabChange = (newTab) => {
     setTab(newTab);
@@ -444,14 +450,17 @@ export default function Finance({ darkMode, onToggleDarkMode }) {
         title={t('finance.title')}
         ranges={RANGES}
         range={range}
-        onRangeChange={(r) => { setRange(r); localStorage.setItem('obs-range', r); }}
+        onRangeChange={setRange}
+        customRange={customRange}
+        onCustomRangeApply={setCustomRange}
         darkMode={darkMode}
         onToggleDarkMode={onToggleDarkMode}
       />
 
       <div className="obs-content" style={{ paddingTop: 0 }}>
         <FinanceOverview
-          range={range}
+          rangeParams={rangeParams}
+          rangeLabel={rangeLabelText}
           tab={tab}
           onTabChange={handleTabChange}
           configuredProviders={configuredProviders}
@@ -467,7 +476,7 @@ export default function Finance({ darkMode, onToggleDarkMode }) {
           </button>
         </div>
 
-        {tab === 'balances' && <BalancesTab range={range} configuredProviders={balanceProviders} onChanged={bumpRefresh} />}
+        {tab === 'balances' && <BalancesTab rangeParams={rangeParams} configuredProviders={balanceProviders} onChanged={bumpRefresh} />}
         {tab === 'budgets'  && <BudgetsTab onChanged={bumpRefresh} />}
       </div>
     </main>
