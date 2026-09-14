@@ -30,6 +30,15 @@
     "collapseSidebar": "Collapse sidebar",
     "language": "Language"
   },
+  "topbar": {
+    "range24h": "24h",
+    "range7d": "7d",
+    "range30d": "1 month",
+    "rangeCustom": "Custom",
+    "rangeFrom": "From",
+    "rangeTo": "To",
+    "rangeApply": "Apply"
+  },
   "common": {
     "save": "Save",
     "saving": "Saving…",
@@ -321,7 +330,7 @@
     "rangeLabel24h": "Last 24 hours",
     "rangeLabel7d": "Last 7 days",
     "rangeLabel30d": "Last 30 days",
-    "rangeLabel90d": "Last 90 days",
+    "rangeLabelCustom": "{{start}} – {{end}}",
     "noKeysTitle": "No API keys configured",
     "noKeysSub": "Go to Settings → Keys to get started",
     "addKeyButton": "Add API key",

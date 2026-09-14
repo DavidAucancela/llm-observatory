@@ -40,19 +40,33 @@ const BASE_LABEL_GRID_SPAN = 7.2;
 // scene-size-independent constant means you can always zoom in tight on a
 // handful of bars no matter how many buckets are in view.
 const MIN_CAMERA_DISTANCE = 8;
-// The default camera distance grows with gridSpan, which is right for 24h/7d
-// but wrong for 30d/90d: those ranges pack many more (already-thinned, see
-// isDense) bars into view, so pulling the default framing *closer* — not
-// farther — is what keeps individual bars legible and clickable. 90d needs
-// to start closer still than 30d since it's the densest range. Keyed off the
-// selected range directly (not a data-derived span) so the zoom level is
-// predictable regardless of how much of that range actually has data.
-const ZOOM_FACTOR_BY_RANGE = { '24h': 1, '7d': 1, '30d': 0.6, '90d': 0.36 };
-// Companion floor for OrbitControls' minDistance — 30d/90d need to allow
-// zooming in tighter than the shared MIN_CAMERA_DISTANCE, not just start
-// closer, since their bars are thinner (isDense) and closer inspection is
-// what makes them individually readable/clickable.
-const MIN_CAMERA_DISTANCE_BY_RANGE = { '24h': MIN_CAMERA_DISTANCE, '7d': MIN_CAMERA_DISTANCE, '30d': 5.5, '90d': 3.5 };
+// The default camera distance grows with gridSpan, which is right for a
+// short range but wrong for a long one: those pack many more (already-
+// thinned, see isDense) bars into view, so pulling the default framing
+// *closer* — not farther — is what keeps individual bars legible and
+// clickable, and the longer the range the closer still it needs to start.
+// This used to be a lookup table keyed by the preset range string ('24h'/
+// '7d'/'30d'/'90d'), but the custom date-range picker can produce any span at
+// all, not just those four — so both are now a continuous function of the
+// actual span (days) covered by the grid (see spanDays below), log-
+// interpolated between two tuned anchors (what used to be the '30d' and '90d'
+// table entries) and clamped past them so an arbitrarily long custom range
+// still gets a sane camera instead of silently reusing the "not dense"
+// default a missing table key would fall back to.
+const DENSITY_ANCHOR_LOW  = { days: 30, zoom: 0.6,  minDist: 5.5 };
+const DENSITY_ANCHOR_HIGH = { days: 90, zoom: 0.36, minDist: 3.5 };
+
+function densityFraming(spanDays) {
+  if (spanDays <= DENSE_THRESHOLD) return { zoom: 1, minDist: MIN_CAMERA_DISTANCE };
+  const clampedDays = Math.min(Math.max(spanDays, DENSITY_ANCHOR_LOW.days), 365);
+  const t = (Math.log(clampedDays) - Math.log(DENSITY_ANCHOR_LOW.days)) /
+            (Math.log(DENSITY_ANCHOR_HIGH.days) - Math.log(DENSITY_ANCHOR_LOW.days));
+  const lerp = (a, b) => a + (b - a) * t;
+  return {
+    zoom:    Math.max(0.2, lerp(DENSITY_ANCHOR_LOW.zoom, DENSITY_ANCHOR_HIGH.zoom)),
+    minDist: Math.max(2.5, lerp(DENSITY_ANCHOR_LOW.minDist, DENSITY_ANCHOR_HIGH.minDist)),
+  };
+}
 // cameraDistance/cameraYRatio are tuned against the desktop chart box, which
 // is wide and short (rail beside the plot). On mobile the box goes nearly
 // square (rail moves above the plot, height fixed at 340px) — with a fixed
@@ -553,7 +567,7 @@ function useThemePalette() {
 // imperative camera actions through the ref exposed by useImperativeHandle
 // below.
 function MetricSurface3D({
-  modelTimeSeries, metric, xLabels, loading, range,
+  modelTimeSeries, metric, xLabels, loading,
   hiddenModels = new Set(), onSwitchTo2D, modelToProvider = {}, otherModels = [],
   orbitLocked = false, autoRotateOn = false,
 }, ref) {
@@ -601,20 +615,21 @@ function MetricSurface3D({
   // ── Camera framing constants + imperative controls ──
   // Computed before the early returns (and the useImperativeHandle below) so
   // the ref the ChartToolbar rail calls into is always populated, even on the
-  // loading / unsupported / no-data renders. Only `grid` and `range` feed
-  // these, both valid at this point.
+  // loading / unsupported / no-data renders. Only `grid` feeds these, valid
+  // at this point.
   const gridSpan = Math.max(grid.hours.length, grid.models.length, 1) * SPACING;
-  const zoomFactor = ZOOM_FACTOR_BY_RANGE[range] ?? 1;
-  const minCameraDistance = MIN_CAMERA_DISTANCE_BY_RANGE[range] ?? MIN_CAMERA_DISTANCE;
-  const cameraDistance = (gridSpan * 1.4 + 5) * zoomFactor;
   // Density must key off the actual time span (days), not raw bucket count:
-  // 24h uses hourly buckets (25 buckets for ~1 day) while 30d/90d use daily
-  // buckets (30/90 buckets for 30/90 days) — comparing bucket counts directly
-  // against DENSE_THRESHOLD misclassified 24h (25 buckets) as dense, shrinking
-  // bars and flattening the camera even with a single real data point.
+  // 24h uses hourly buckets (25 buckets for ~1 day) while a multi-week range
+  // uses daily buckets (one bucket per day) — comparing bucket counts
+  // directly against DENSE_THRESHOLD misclassified 24h (25 buckets) as
+  // dense, shrinking bars and flattening the camera even with a single real
+  // data point. Computed first since zoomFactor/minCameraDistance below now
+  // derive from it too (see densityFraming).
   const spanDays = grid.hours.length > 1
     ? (new Date(grid.hours[grid.hours.length - 1]) - new Date(grid.hours[0])) / 86_400_000
     : 0;
+  const { zoom: zoomFactor, minDist: minCameraDistance } = densityFraming(spanDays);
+  const cameraDistance = (gridSpan * 1.4 + 5) * zoomFactor;
   const isDense = spanDays > DENSE_THRESHOLD;
   const barSize = isDense ? BAR_SIZE * 0.6 : BAR_SIZE;
   const cameraYRatio = isDense ? 0.85 : 0.55;

@@ -2,8 +2,14 @@ const express = require('express');
 const { z } = require('zod');
 const pool = require('../db/pool');
 const { deliverWebhooks } = require('../services/webhooks');
-const { getRangeIntervals } = require('../utils/dateRange');
+const { getRangeIntervals, appendTimeWindow } = require('../utils/dateRange');
 const { isKnownModel, splitRecordedCost } = require('../services/pricingBridge');
+const { PROVIDERS } = require('../constants/providers');
+
+// Zero-fill grid for the per-provider time series. Built from the shared list
+// so the two queries below can never drift apart from each other (they were
+// two hand-maintained copies of the same literal) or from the ingest enum.
+const PROVIDER_VALUES_SQL = PROVIDERS.map(p => `('${p}')`).join(', ');
 
 const router = express.Router();
 
@@ -32,7 +38,7 @@ function enrichByModel(rows) {
 }
 
 const MetricSchema = z.object({
-  provider:           z.enum(['anthropic', 'openai', 'gemini', 'grok', 'kimi']).default('anthropic'),
+  provider:           z.enum(PROVIDERS).default('anthropic'),
   model:              z.string().min(1),
   input_tokens:       z.number().int().min(0),
   output_tokens:      z.number().int().min(0),
@@ -385,7 +391,7 @@ router.get('/summary', async (req, res) => {
                 COALESCE(SUM(ac.cost_usd),0)      as cost_usd,
                 COUNT(ac.id) as requests
          FROM generate_series(${tsSeriesStart}, ${tsSeriesEnd}, INTERVAL '1 ${bucketUnit}') AS bs(bucket)
-         CROSS JOIN (VALUES ('anthropic'), ('openai'), ('gemini'), ('grok'), ('kimi')) AS p(provider)
+         CROSS JOIN (VALUES ${PROVIDER_VALUES_SQL}) AS p(provider)
          LEFT JOIN api_calls ac
                 ON date_trunc('${bucketUnit}', ac.timestamp) = bs.bucket
                AND ac.provider = p.provider
@@ -451,7 +457,7 @@ router.get('/summary', async (req, res) => {
                 COALESCE(SUM(ac.cost_usd),0)     as cost_usd,
                 COUNT(ac.id) as requests
          FROM generate_series(${tsSeriesStart}, ${tsSeriesEnd}, INTERVAL '1 ${bucketUnit}') AS bs(bucket)
-         CROSS JOIN (VALUES ('anthropic'), ('openai'), ('gemini'), ('grok'), ('kimi')) AS p(provider)
+         CROSS JOIN (VALUES ${PROVIDER_VALUES_SQL}) AS p(provider)
          LEFT JOIN api_calls ac
                 ON date_trunc('${bucketUnit}', ac.timestamp + INTERVAL '${interval}') = bs.bucket
                AND ac.provider = p.provider
@@ -628,16 +634,16 @@ router.get('/export', async (req, res) => {
 router.get('/tag-keys', async (req, res) => {
   try {
     const { orgId } = req.user;
-    const range    = req.query.range || '7d';
-    const rangeMap = { '24h':'24 hours', '7d':'7 days', '30d':'30 days', '60d':'60 days', '90d':'90 days' };
-    const interval = rangeMap[range] || '7 days';
+    const range = req.query.range || '7d';
+    const params = [orgId];
+    const timeWindow = appendTimeWindow(params, { range, start: req.query.start, end: req.query.end });
     const result = await pool.query(
       `SELECT DISTINCT jsonb_object_keys(tags) as key
        FROM api_calls
        WHERE org_id = $1 AND tags != '{}'::jsonb
-         AND timestamp > NOW() - INTERVAL '${interval}'
+         AND ${timeWindow}
        ORDER BY key LIMIT 50`,
-      [orgId]
+      params
     );
     res.json({ keys: result.rows.map(r => r.key) });
   } catch (err) {
@@ -652,16 +658,16 @@ router.get('/tag-values', async (req, res) => {
     const { orgId } = req.user;
     const key = req.query.key?.trim();
     if (!key) return res.status(400).json({ error: 'key is required' });
-    const range    = req.query.range || '7d';
-    const rangeMap = { '24h':'24 hours', '7d':'7 days', '30d':'30 days', '60d':'60 days', '90d':'90 days' };
-    const interval = rangeMap[range] || '7 days';
+    const range = req.query.range || '7d';
+    const params = [orgId, key];
+    const timeWindow = appendTimeWindow(params, { range, start: req.query.start, end: req.query.end });
     const result = await pool.query(
       `SELECT DISTINCT tags->>$2 as value
        FROM api_calls
        WHERE org_id = $1 AND tags ? $2
-         AND timestamp > NOW() - INTERVAL '${interval}'
+         AND ${timeWindow}
        ORDER BY value LIMIT 100`,
-      [orgId, key]
+      params
     );
     res.json({ values: result.rows.map(r => r.value).filter(v => v !== null) });
   } catch (err) {
@@ -676,9 +682,9 @@ router.get('/tag-breakdown', async (req, res) => {
     const { orgId } = req.user;
     const key = req.query.key?.trim();
     if (!key) return res.status(400).json({ error: 'key is required' });
-    const range    = req.query.range || '7d';
-    const rangeMap = { '24h':'24 hours', '7d':'7 days', '30d':'30 days', '60d':'60 days', '90d':'90 days' };
-    const interval = rangeMap[range] || '7 days';
+    const range = req.query.range || '7d';
+    const params = [orgId, key];
+    const timeWindow = appendTimeWindow(params, { range, start: req.query.start, end: req.query.end });
     const result = await pool.query(
       `SELECT tags->>$2 as value,
               COUNT(*) as requests,
@@ -686,9 +692,9 @@ router.get('/tag-breakdown', async (req, res) => {
               COALESCE(SUM(total_tokens), 0) as total_tokens
        FROM api_calls
        WHERE org_id = $1 AND tags ? $2
-         AND timestamp > NOW() - INTERVAL '${interval}'
+         AND ${timeWindow}
        GROUP BY value ORDER BY total_cost DESC LIMIT 20`,
-      [orgId, key]
+      params
     );
     res.json({ key, data: result.rows });
   } catch (err) {
@@ -701,9 +707,9 @@ router.get('/tag-breakdown', async (req, res) => {
 router.get('/project-breakdown', async (req, res) => {
   try {
     const { orgId } = req.user;
-    const range    = req.query.range || '7d';
-    const rangeMap = { '24h':'24 hours', '7d':'7 days', '30d':'30 days', '60d':'60 days', '90d':'90 days' };
-    const interval = rangeMap[range] || '7 days';
+    const range = req.query.range || '7d';
+    const params = [orgId];
+    const timeWindow = appendTimeWindow(params, { range, start: req.query.start, end: req.query.end });
     const result = await pool.query(
       `SELECT token_name as value,
               COUNT(*) as requests,
@@ -711,9 +717,9 @@ router.get('/project-breakdown', async (req, res) => {
               COALESCE(SUM(total_tokens), 0) as total_tokens
        FROM api_calls
        WHERE org_id = $1 AND token_name IS NOT NULL
-         AND timestamp > NOW() - INTERVAL '${interval}'
+         AND ${timeWindow}
        GROUP BY value ORDER BY total_cost DESC LIMIT 20`,
-      [orgId]
+      params
     );
     res.json({ data: result.rows });
   } catch (err) {

@@ -6,13 +6,15 @@ import RequestDrawer from '../components/RequestDrawer';
 import TopBar from '../components/TopBar';
 import { fmtDateTime, formatCost, fmtLatency } from '../utils/fmt';
 import { useApi } from '../hooks/useApi';
+import { useRangeFilter } from '../hooks/useRangeFilter';
+import { RANGE_PRESETS, buildRangeParams } from '../utils/dateRange';
 
-const RANGES = ['24h', '7d', '30d', '90d'];
+const RANGES = RANGE_PRESETS;
 
 const PROVIDER_LABELS = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', grok: 'Grok', kimi: 'Kimi' };
 
 // ── Requests tab ──────────────────────────────────────────────
-function RequestsTab({ range, configuredProviders }) {
+function RequestsTab({ range, rangeParams, configuredProviders }) {
   // Deep-link support: insight cards on the Dashboard link here with
   // ?model=<model>&status=error to jump straight to the offending rows.
   const [searchParams] = useSearchParams();
@@ -33,26 +35,27 @@ function RequestsTab({ range, configuredProviders }) {
   const [tagValue, setTagValue] = useState('');
   const { apiFetch } = useApi();
   const { t } = useTranslation();
+  const rangeKey = new URLSearchParams(rangeParams).toString();
 
   useEffect(() => {
-    apiFetch(`/api/metrics/tag-keys?range=${range}`)
+    apiFetch(`/api/metrics/tag-keys?${rangeKey}`)
       .then(r => r.json())
       .then(d => setTagKeys(d.keys || []))
       .catch(() => {});
-  }, [range]);
+  }, [rangeKey]);
 
   useEffect(() => {
     if (!tagKey) { setTagValues([]); setTagValue(''); return; }
-    apiFetch(`/api/metrics/tag-values?key=${encodeURIComponent(tagKey)}&range=${range}`)
+    apiFetch(`/api/metrics/tag-values?key=${encodeURIComponent(tagKey)}&${rangeKey}`)
       .then(r => r.json())
       .then(d => setTagValues(d.values || []))
       .catch(() => {});
-  }, [tagKey, range]);
+  }, [tagKey, rangeKey]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page, limit: 20, sortBy, sortDir, range });
+      const params = new URLSearchParams({ page, limit: 20, sortBy, sortDir, ...rangeParams });
       if (provider) params.set('provider', provider);
       if (status)   params.set('status',   status);
       if (model)    params.set('model',    model);
@@ -63,11 +66,11 @@ function RequestsTab({ range, configuredProviders }) {
       setData(await res.json());
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
-  }, [page, range, provider, status, model, search, sortBy, sortDir, tagKey, tagValue]);
+  }, [page, rangeKey, provider, status, model, search, sortBy, sortDir, tagKey, tagValue]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  useEffect(() => { setPage(1); }, [range]);
+  useEffect(() => { setPage(1); }, [rangeKey]);
 
   useEffect(() => {
     const timer = setTimeout(() => { setSearch(searchInput); setPage(1); }, 350);
@@ -82,7 +85,7 @@ function RequestsTab({ range, configuredProviders }) {
 
   const handleExport = async () => {
     try {
-      const params = new URLSearchParams({ range });
+      const params = new URLSearchParams({ ...rangeParams });
       if (provider) params.set('provider', provider);
       if (status)   params.set('status',   status);
       if (model)    params.set('model',    model);
@@ -272,10 +275,11 @@ function RequestsTab({ range, configuredProviders }) {
 
 // ── Page ──────────────────────────────────────────────────────
 export default function Activity({ darkMode, onToggleDarkMode }) {
-  const [range, setRange] = useState(() => localStorage.getItem('obs-range') || '7d');
+  const { range, setRange, customRange, setCustomRange } = useRangeFilter('7d');
   const [configuredProviders, setConfiguredProviders] = useState([]);
   const { apiFetch } = useApi();
   const { t } = useTranslation();
+  const rangeParams = buildRangeParams(range, customRange);
 
   useEffect(() => {
     apiFetch('/api/credentials')
@@ -287,24 +291,21 @@ export default function Activity({ darkMode, onToggleDarkMode }) {
       .catch(() => {});
   }, []);
 
-  const handleRangeChange = (r) => {
-    setRange(r);
-    localStorage.setItem('obs-range', r);
-  };
-
   return (
     <main className="obs-main obs-fade-in">
       <TopBar
         title={t('activity.requestsTab')}
         ranges={RANGES}
         range={range}
-        onRangeChange={handleRangeChange}
+        onRangeChange={setRange}
+        customRange={customRange}
+        onCustomRangeApply={setCustomRange}
         darkMode={darkMode}
         onToggleDarkMode={onToggleDarkMode}
       />
 
       <div className="obs-content" style={{ paddingTop: 0 }}>
-        <RequestsTab range={range} configuredProviders={configuredProviders} />
+        <RequestsTab range={range} rangeParams={rangeParams} configuredProviders={configuredProviders} />
       </div>
     </main>
   );
