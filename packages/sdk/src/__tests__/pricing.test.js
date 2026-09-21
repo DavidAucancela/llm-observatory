@@ -105,7 +105,7 @@ describe('calculateDeepInfraCost', () => {
 
   it('all known DeepInfra models have valid pricing and an org/Model id', () => {
     for (const [model, pricing] of Object.entries(DEEPINFRA_PRICING)) {
-      assert.ok(model.includes('/'), `${model} should be an org/Model id`);
+      assert.match(model, /^[^/\s]+\/[^/\s]+$/, `${model} should be an org/Model id`);
       assert.ok(pricing.input >= 0, `${model} input price should be >= 0`);
       assert.ok(pricing.output >= 0, `${model} output price should be >= 0`);
     }

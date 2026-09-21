@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from llm_observatory._pricing import (
     ANTHROPIC_PRICING,
@@ -132,7 +134,7 @@ class TestCalculateDeepInfraCost:
 
     def test_all_deepinfra_models_have_valid_pricing_and_org_ids(self):
         for model, pricing in DEEPINFRA_PRICING.items():
-            assert "/" in model, f"{model} should be an org/Model id"
+            assert re.fullmatch(r"[^/\s]+/[^/\s]+", model), f"{model} should be an org/Model id"
             assert pricing["input"] >= 0, f"{model} input price must be >= 0"
             assert pricing["output"] >= 0, f"{model} output price must be >= 0"
 

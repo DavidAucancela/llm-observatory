@@ -209,6 +209,29 @@ class TestMonitoredDeepInfraAsync:
         assert metric["cost_usd"] == pytest.approx(0.77)
 
 
+    async def test_async_sends_metric_and_reraises_on_error(self):
+        from llm_observatory.deepinfra import AsyncMonitoredDeepInfra, _AsyncDeepInfraChatProxy
+
+        err = Exception("rate limited")
+        err.status_code = 429
+        instance = object.__new__(AsyncMonitoredDeepInfra)
+        instance._observatory_url = "http://obs:3001"
+        instance._observatory_token = "obs_sk_test"
+        instance._tags = {}
+        instance._api_key_hint = "di-…5678"
+        instance._client = MagicMock()
+        instance._client.chat.completions.create = AsyncMock(side_effect=err)
+        instance.chat = _AsyncDeepInfraChatProxy(instance)
+
+        with patch("llm_observatory.deepinfra.send_metric_background_async", new=AsyncMock()) as send:
+            with pytest.raises(Exception, match="rate limited"):
+                await instance.chat.completions.create(model=MODEL, messages=MSGS)
+
+        metric = send.call_args[0][1]
+        assert metric["status_code"] == 429
+        assert metric["cost_usd"] == 0.0
+
+
 class TestMonitoredDeepInfraConstructor:
     def test_defaults_base_url_to_deepinfra(self, mock_send):
         from llm_observatory.deepinfra import MonitoredDeepInfra, DEEPINFRA_BASE_URL
