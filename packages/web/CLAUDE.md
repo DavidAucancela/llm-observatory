@@ -73,7 +73,7 @@ Las páginas de auth (Login/Register/ForgotPassword/ResetPassword) usan el tema 
 - Metric colors: `--tokens-color: #06B6D4`, `--cost-color: #7C3AED`, `--latency-color: #F59E0B`
 - Dark mode es el default para nuevos usuarios (`localStorage.getItem('dark-mode') !== 'false'`)
 
-**Logo:** `packages/web/public/logoMain.png` — referenciado como `/logoMain.png` en Sidebar, Login, Register, LandingPage. Clase `.obs-brand-logo` (28×28px, border-radius 6px, object-fit cover). También usado como favicon en `index.html`.
+**Logo:** `packages/web/public/logo-dark.png` y `logo-light.png`. El Sidebar elige uno según el tema (`darkMode ? '/logo-dark.png' : '/logo-light.png'`); Login, Register, ForgotPassword, ResetPassword y LandingPage usan `/logo-dark.png`. Clase `.obs-brand-logo` (28×28px, border-radius 6px, object-fit cover). `logo-dark.png` también es el favicon y el `og:image` en `index.html`.
 
 **Layout obligatorio por página:**
 ```jsx
