@@ -19,13 +19,16 @@ async function createApiCall(obsToken, overrides = {}) {
   return res.body.data.id;
 }
 
-async function createBudgetAlert(jwt, provider = 'anthropic') {
-  // Create a rule and trigger it by posting a metric over the threshold
-  const ruleRes = await request(app)
-    .post('/api/alerts/rules')
-    .set('Authorization', `Bearer ${jwt}`)
-    .send({ provider, threshold_usd: 0.0001 });
-  expect(ruleRes.status).toBe(201);
+async function createBudgetAlert(orgId, provider = 'anthropic') {
+  // alert_history is only written by the hourly jobs/alertChecker cron, never by
+  // POST /api/metrics — so seed the row the bell reads instead of trying to
+  // trigger a rule through the API.
+  const pool = require('../db/pool');
+  await pool.query(
+    `INSERT INTO alert_history (org_id, provider, current_value, threshold_usd, sent_at, success)
+     VALUES ($1, $2, $3, $4, NOW(), true)`,
+    [orgId, provider, 0.5, 0.1]
+  );
 }
 
 async function createReconciliationAlert(orgId) {
@@ -40,7 +43,7 @@ async function createReconciliationAlert(orgId) {
 
 describe('GET /api/notifications', () => {
   it('returns budget_alert, reconciliation, and team_joined types', async () => {
-    const { obsToken, jwt, orgId } = await createOrg('Test Org');
+    const { jwt, orgId } = await createOrg('Test Org');
 
     // Seed: create an invitation and accept it to generate team_joined
     const pool = require('../db/pool');
@@ -57,13 +60,8 @@ describe('GET /api/notifications', () => {
       .send({ token: invRow.rows[0].token, email: 'newmember@test.com', password: 'TestPass123!' });
     expect(acceptRes.status).toBe(200);
 
-    // Create a budget alert rule (will trigger on next metric over threshold)
-    await createBudgetAlert(jwt);
-
-    // Post a metric that exceeds budget
-    await createApiCall(obsToken, { cost_usd: 0.00050 });
-
-    // Post a metric to create reconciliation deviation
+    // Seed a fired budget alert and a reconciliation deviation
+    await createBudgetAlert(orgId);
     await createReconciliationAlert(orgId);
 
     // Fetch notifications
