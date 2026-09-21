@@ -1,9 +1,9 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const {
-  calculateCost, calculateOpenAICost, calculateGeminiCost, calculateGrokCost, calculateKimiCost,
+  calculateCost, calculateOpenAICost, calculateGeminiCost, calculateGrokCost, calculateKimiCost, calculateDeepInfraCost,
   normalizeModelId, finalizeMetricPricing,
-  ANTHROPIC_PRICING, OPENAI_PRICING, GEMINI_PRICING, GROK_PRICING, KIMI_PRICING,
+  ANTHROPIC_PRICING, OPENAI_PRICING, GEMINI_PRICING, GROK_PRICING, KIMI_PRICING, DEEPINFRA_PRICING,
 } = require('../index.js');
 
 describe('calculateCost (Anthropic)', () => {
@@ -89,6 +89,32 @@ describe('calculateKimiCost', () => {
       assert.ok(pricing.input >= 0, `${model} input price should be >= 0`);
       assert.ok(pricing.output >= 0, `${model} output price should be >= 0`);
     }
+  });
+});
+
+describe('calculateDeepInfraCost', () => {
+  it('calculates cost for a priced model correctly', () => {
+    const cost = calculateDeepInfraCost('meta-llama/Llama-3.3-70B-Instruct-Turbo', 1_000_000, 1_000_000);
+    assert.ok(Math.abs(cost - 0.42) < 1e-9); // 0.10 + 0.32
+  });
+
+  it('returns zero for unknown models', () => {
+    const cost = calculateDeepInfraCost('some-org/unknown-model', 1_000_000, 0);
+    assert.strictEqual(cost, 0);
+  });
+
+  it('all known DeepInfra models have valid pricing and an org/Model id', () => {
+    for (const [model, pricing] of Object.entries(DEEPINFRA_PRICING)) {
+      assert.ok(model.includes('/'), `${model} should be an org/Model id`);
+      assert.ok(pricing.input >= 0, `${model} input price should be >= 0`);
+      assert.ok(pricing.output >= 0, `${model} output price should be >= 0`);
+    }
+  });
+
+  it('finalizeMetricPricing flags an unpriced deepinfra model as unknown', () => {
+    const data = { provider: 'deepinfra', model: 'some-org/unknown-model', input_tokens: 10, output_tokens: 5, cost_usd: 0 };
+    finalizeMetricPricing(data);
+    assert.strictEqual(data.cost_confidence, 'unknown');
   });
 });
 

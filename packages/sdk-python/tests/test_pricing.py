@@ -5,11 +5,13 @@ from llm_observatory._pricing import (
     GEMINI_PRICING,
     GROK_PRICING,
     KIMI_PRICING,
+    DEEPINFRA_PRICING,
     calculate_cost,
     calculate_openai_cost,
     calculate_gemini_cost,
     calculate_grok_cost,
     calculate_kimi_cost,
+    calculate_deepinfra_cost,
     normalize_model_id,
     finalize_metric_pricing,
 )
@@ -115,6 +117,32 @@ class TestCalculateKimiCost:
             assert pricing["output"] >= 0, f"{model} output price must be >= 0"
 
 
+class TestCalculateDeepInfraCost:
+    def test_llama_cost(self):
+        # (1M input * $0.10) + (1M output * $0.32) = $0.42
+        model = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+        assert calculate_deepinfra_cost(model, 1_000_000, 1_000_000) == pytest.approx(0.42)
+
+    def test_zero_tokens(self):
+        assert calculate_deepinfra_cost("deepseek-ai/DeepSeek-V4-Pro", 0, 0) == 0.0
+
+    def test_unknown_model_returns_zero(self):
+        with pytest.warns(UserWarning, match="Unknown DeepInfra model pricing"):
+            assert calculate_deepinfra_cost("some-org/unknown-model", 1_000_000, 1_000_000) == 0.0
+
+    def test_all_deepinfra_models_have_valid_pricing_and_org_ids(self):
+        for model, pricing in DEEPINFRA_PRICING.items():
+            assert "/" in model, f"{model} should be an org/Model id"
+            assert pricing["input"] >= 0, f"{model} input price must be >= 0"
+            assert pricing["output"] >= 0, f"{model} output price must be >= 0"
+
+    def test_finalize_flags_unpriced_deepinfra_model_unknown(self):
+        data = {"provider": "deepinfra", "model": "some-org/unknown-model",
+                "input_tokens": 10, "output_tokens": 5, "cost_usd": 0.0}
+        finalize_metric_pricing(data)
+        assert data["cost_confidence"] == "unknown"
+
+
 class TestNormalizeModelId:
     def test_strips_models_prefix(self):
         assert normalize_model_id("models/gemini-2.5-flash", GEMINI_PRICING) == "gemini-2.5-flash"
@@ -178,7 +206,7 @@ class TestNodePythonPricingParity:
         src = pathlib.Path(__file__).parents[2] / "sdk" / "src" / "index.js"
         text = src.read_text()
         tables = {}
-        for name in ("ANTHROPIC_PRICING", "OPENAI_PRICING", "GEMINI_PRICING", "GROK_PRICING", "KIMI_PRICING"):
+        for name in ("ANTHROPIC_PRICING", "OPENAI_PRICING", "GEMINI_PRICING", "GROK_PRICING", "KIMI_PRICING", "DEEPINFRA_PRICING"):
             m = re.search(name + r"\s*=\s*\{(.*?)\n\};", text, re.S)
             assert m, f"could not find {name} in Node SDK"
             entries = re.findall(
@@ -195,6 +223,7 @@ class TestNodePythonPricingParity:
             "GEMINI_PRICING": GEMINI_PRICING,
             "GROK_PRICING": GROK_PRICING,
             "KIMI_PRICING": KIMI_PRICING,
+            "DEEPINFRA_PRICING": DEEPINFRA_PRICING,
         }
         for name, py_table in py.items():
             assert node[name] == py_table, f"{name} diverged between Node and Python SDKs"

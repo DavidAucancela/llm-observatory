@@ -10,7 +10,7 @@ import { RANGE_PRESETS, buildRangeParams, rangeLabel } from '../utils/dateRange'
 
 const RANGES = RANGE_PRESETS;
 
-const PROVIDER_COLORS = { anthropic: '#D97706', openai: '#059669', gemini: '#4285F4', grok: '#3F3F46', kimi: '#0D9488' };
+const PROVIDER_COLORS = { anthropic: '#D97706', openai: '#059669', gemini: '#4285F4', grok: '#3F3F46', kimi: '#0D9488', deepinfra: '#7C3AED' };
 
 function parseModel(m) {
   return {
@@ -32,7 +32,7 @@ function parseModel(m) {
   };
 }
 
-const PROVIDER_LABELS = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', grok: 'Grok', kimi: 'Kimi' };
+const PROVIDER_LABELS = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', grok: 'Grok', kimi: 'Kimi', deepinfra: 'DeepInfra' };
 
 // Cost per 1K tokens vs. avg latency, bubble sized by request volume — answers
 // "which model is actually worth using", which sorting-by-total-cost alone

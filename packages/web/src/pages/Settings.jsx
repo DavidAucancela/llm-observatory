@@ -356,6 +356,7 @@ function AlertsTab() {
                 <option value="gemini">Gemini</option>
                 <option value="grok">Grok</option>
                 <option value="kimi">Kimi</option>
+                <option value="deepinfra">DeepInfra</option>
               </select>
             </div>
             <div className="obs-field">

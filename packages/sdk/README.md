@@ -1,6 +1,6 @@
 # @llm-observatory/sdk
 
-Drop-in Node.js wrapper for the Anthropic, OpenAI, Gemini, Grok (xAI), and Kimi (Moonshot AI) SDKs that streams usage metrics to your [LLM Observatory](https://github.com/DavidAucancela/llm-observatory) dashboard with **zero latency overhead**.
+Drop-in Node.js wrapper for the Anthropic, OpenAI, Gemini, Grok (xAI), Kimi (Moonshot AI), and DeepInfra SDKs that streams usage metrics to your [LLM Observatory](https://github.com/DavidAucancela/llm-observatory) dashboard with **zero latency overhead**.
 
 ## How it works
 
@@ -17,7 +17,7 @@ Your app ──► MonitoredAnthropic.messages.create()
 
 ```bash
 npm install @llm-observatory/sdk
-# If using OpenAI, Grok, or Kimi (Grok/Kimi reuse the OpenAI SDK with a custom baseURL):
+# If using OpenAI, Grok, Kimi, or DeepInfra (Grok/Kimi/DeepInfra reuse the OpenAI SDK with a custom baseURL):
 npm install openai
 # If using Gemini:
 npm install @google/genai
@@ -118,6 +118,25 @@ const response = await client.chat.completions.create({
 });
 ```
 
+### DeepInfra
+
+```javascript
+const { MonitoredDeepInfra } = require('@llm-observatory/sdk');
+
+const client = new MonitoredDeepInfra({
+  apiKey: process.env.DEEPINFRA_API_KEY,
+  observatoryUrl: 'http://localhost:3001',
+  observatoryToken: process.env.OBSERVATORY_TOKEN
+});
+
+const response = await client.chat.completions.create({
+  model: 'deepseek-ai/DeepSeek-V4-Pro',
+  messages: [{ role: 'user', content: 'Hello!' }]
+});
+```
+
+DeepInfra model ids are the `org/Model` form and are case-sensitive.
+
 ### Constructor options
 
 | Option | Required | Description |
@@ -145,7 +164,7 @@ Each API call records:
 | Field | Description |
 |-------|-------------|
 | `model` | Model name |
-| `provider` | `anthropic`, `openai`, `gemini`, `grok`, or `kimi` |
+| `provider` | `anthropic`, `openai`, `gemini`, `grok`, `kimi`, or `deepinfra` |
 | `input_tokens` | Prompt tokens used |
 | `output_tokens` | Completion tokens used |
 | `cost_usd` | Estimated cost (USD) |
@@ -166,6 +185,8 @@ Each API call records:
 
 **Kimi (Moonshot AI):** kimi-k3, kimi-k2.6, kimi-k2.7-code, kimi-k2.7-code-highspeed
 
+**DeepInfra:** a subset of popular models (DeepSeek V3/V3.1/V3.2/V4, Kimi K3/K2.7-Code, Qwen3-Max, Gemma 4, Llama 3.3 70B / 3.1 8B Turbo, Mistral Nemo, …) — DeepInfra hosts hundreds and reprices often, so a model missing from the table is recorded with `cost_usd = 0` and flagged `cost_confidence: 'unknown'`. If the API response reports its own cost it is used instead of the table.
+
 Unknown models are tracked with `cost_usd = 0` and a warning is logged. Pricing tables use the standard (<200k context) tier where a provider charges more beyond that threshold — see `src/index.js` for the exact per-model rates.
 
 ## OpenAI extended support
@@ -176,7 +197,7 @@ Unknown models are tracked with `cost_usd = 0` and a warning is logged. Pricing 
 - **Transcription** — `client.audio.transcriptions.create()` (Whisper)
 - **Text-to-speech** — `client.audio.speech.create()`
 
-`MonitoredGrok` and `MonitoredKimi` only instrument `chat.completions.create()` (streaming and non-streaming) — neither provider exposes an embeddings/audio API today.
+`MonitoredGrok`, `MonitoredKimi` and `MonitoredDeepInfra` only instrument `chat.completions.create()` (streaming and non-streaming).
 
 ## License
 

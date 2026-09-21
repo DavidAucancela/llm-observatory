@@ -96,7 +96,7 @@ function KeyRow({ cred, onDeleted, onTested, isAdmin }) {
 // sync.js). Locking key_type to 'sdk' here matches the server: nothing stops an
 // 'admin' row for these being created via a raw API call, but there's no UI/test
 // path or sync route that would ever use one.
-const SDK_ONLY_PROVIDERS = ['gemini', 'grok', 'kimi'];
+const SDK_ONLY_PROVIDERS = ['gemini', 'grok', 'kimi', 'deepinfra'];
 
 function AddKeyForm({ onSaved, onCancel }) {
   const { apiFetch } = useApi();
@@ -122,6 +122,7 @@ function AddKeyForm({ onSaved, onCancel }) {
     : form.provider === 'gemini' ? 'AIza…'
     : form.provider === 'grok' ? 'xai-…'
     : form.provider === 'kimi' ? 'sk-…'
+    : form.provider === 'deepinfra' ? 'DeepInfra API key'
     : (form.key_type === 'admin' ? 'sk-admin-…' : 'sk-proj-…');
 
   return (
@@ -143,6 +144,7 @@ function AddKeyForm({ onSaved, onCancel }) {
               <option value="gemini">Gemini</option>
               <option value="grok">Grok</option>
               <option value="kimi">Kimi</option>
+              <option value="deepinfra">DeepInfra</option>
             </select>
             <select className="obs-select" style={{ height: 36, flex: 1 }} value={form.key_type} disabled={SDK_ONLY_PROVIDERS.includes(form.provider)} onChange={e => set('key_type', e.target.value)}>
               <option value="sdk">{t('settings.keys.sdkType')}</option>

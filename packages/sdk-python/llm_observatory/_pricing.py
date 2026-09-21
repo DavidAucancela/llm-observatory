@@ -167,6 +167,31 @@ KIMI_PRICING: dict[str, dict[str, float]] = {
     "kimi-k2.7-code-highspeed": {"input": 1.90, "output":  8.00},
 }
 
+# Cost per million tokens (USD) — per deepinfra.com/pricing, read 2026-09-21.
+# DeepInfra hosts hundreds of models and reprices them often, so this covers
+# only the popular ones: a model missing here prices at $0 and is flagged
+# cost_confidence='unknown' instead of guessing. When the API response reports
+# its own cost, that figure wins over this table. Cache-miss (standard) rate
+# only. Keep in sync with DEEPINFRA_PRICING in packages/sdk/src/index.js. Ids
+# are DeepInfra's own ``org/Model`` form and are case-sensitive.
+DEEPINFRA_PRICING: dict[str, dict[str, float]] = {
+    "deepseek-ai/DeepSeek-V4-Flash-0731":          {"input": 0.06,  "output":  0.18},
+    "deepseek-ai/DeepSeek-V4-Flash":               {"input": 0.09,  "output":  0.18},
+    "deepseek-ai/DeepSeek-V4-Pro":                 {"input": 1.30,  "output":  2.60},
+    "deepseek-ai/DeepSeek-V3.2":                   {"input": 0.26,  "output":  0.38},
+    "deepseek-ai/DeepSeek-V3.1":                   {"input": 0.25,  "output":  0.95},
+    "deepseek-ai/DeepSeek-V3":                     {"input": 0.32,  "output":  0.89},
+    "moonshotai/Kimi-K3":                          {"input": 2.85,  "output": 14.25},
+    "moonshotai/Kimi-K2.7-Code":                   {"input": 0.68,  "output":  3.40},
+    "Qwen/Qwen3-Max":                              {"input": 1.20,  "output":  6.00},
+    "google/gemma-4-31B-it":                       {"input": 0.13,  "output":  0.38},
+    "google/gemini-2.5-flash":                     {"input": 0.30,  "output":  2.50},
+    "anthropic/claude-sonnet-5":                   {"input": 3.00,  "output": 15.00},
+    "meta-llama/Llama-3.3-70B-Instruct-Turbo":     {"input": 0.10,  "output":  0.32},
+    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo": {"input": 0.02,  "output":  0.04},
+    "mistralai/Mistral-Nemo-Instruct-2407":        {"input": 0.019, "output":  0.03},
+}
+
 
 def calculate_grok_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     pricing = GROK_PRICING.get(normalize_model_id(model, GROK_PRICING))
@@ -190,6 +215,7 @@ _PROVIDER_PRICING: dict[str, dict] = {
     "gemini":    GEMINI_PRICING,
     "grok":      GROK_PRICING,
     "kimi":      KIMI_PRICING,
+    "deepinfra": DEEPINFRA_PRICING,
 }
 
 
@@ -198,6 +224,18 @@ def calculate_kimi_cost(model: str, input_tokens: int, output_tokens: int) -> fl
     if not pricing:
         warnings.warn(
             f'[LLM Observatory] Unknown Kimi model pricing: "{model}" — cost recorded as $0',
+            stacklevel=3,
+        )
+        return 0.0
+    return (input_tokens / 1_000_000) * pricing["input"] + \
+           (output_tokens / 1_000_000) * pricing["output"]
+
+
+def calculate_deepinfra_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    pricing = DEEPINFRA_PRICING.get(normalize_model_id(model, DEEPINFRA_PRICING))
+    if not pricing:
+        warnings.warn(
+            f'[LLM Observatory] Unknown DeepInfra model pricing: "{model}" — cost recorded as $0',
             stacklevel=3,
         )
         return 0.0

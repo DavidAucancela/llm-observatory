@@ -5,6 +5,17 @@ const {
 const M = 1_000_000;
 
 describe('pricingBridge.costForProviderUsage', () => {
+  it('prices a DeepInfra org/Model id from the SDK table', () => {
+    // Llama-3.3-70B-Instruct-Turbo is $0.10 in / $0.32 out per 1M
+    expect(costForProviderUsage('deepinfra', 'meta-llama/Llama-3.3-70B-Instruct-Turbo', { uncachedInput: M, output: M }))
+      .toBeCloseTo(0.42, 6);
+  });
+
+  it('recognizes a priced DeepInfra model and flags an unpriced one', () => {
+    expect(isKnownModel('deepinfra', 'deepseek-ai/DeepSeek-V4-Pro')).toBe(true);
+    expect(isKnownModel('deepinfra', 'some-org/Brand-New-Model')).toBe(false);
+  });
+
   it('prices a dated OpenAI snapshot model id (bug 2 — was $0)', () => {
     // gpt-4o-mini is $0.15 / 1M input
     expect(costForProviderUsage('openai', 'gpt-4o-mini-2024-07-18', { uncachedInput: M }))

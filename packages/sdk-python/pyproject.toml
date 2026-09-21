@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "llm-observatory"
 version = "1.0.0"
-description = "Drop-in observability wrapper for Anthropic, OpenAI, Gemini (Google), Grok (xAI), and Kimi (Moonshot AI) Python SDKs"
+description = "Drop-in observability wrapper for Anthropic, OpenAI, Gemini (Google), Grok (xAI), Kimi (Moonshot AI), and DeepInfra Python SDKs"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-keywords = ["llm", "observability", "anthropic", "openai", "gemini", "google", "grok", "xai", "kimi", "moonshot", "monitoring", "claude"]
+keywords = ["llm", "observability", "anthropic", "openai", "gemini", "google", "grok", "xai", "kimi", "moonshot", "deepinfra", "monitoring", "claude"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -28,12 +28,13 @@ dependencies = [
 [project.optional-dependencies]
 openai = ["openai>=1.0.0"]
 gemini = ["google-genai>=1.0.0"]
-# Grok (xAI) and Kimi (Moonshot AI) both expose an OpenAI-compatible API, so
-# MonitoredGrok/MonitoredKimi reuse the openai package under a custom base_url —
+# Grok (xAI), Kimi (Moonshot AI) and DeepInfra all expose an OpenAI-compatible API,
+# so MonitoredGrok/MonitoredKimi/MonitoredDeepInfra reuse the openai package under a custom base_url —
 # these extras are aliases of the same dependency for clearer install intent.
 # (Gemini is not OpenAI-compatible, so its extra above is a real dependency, not an alias.)
 grok = ["openai>=1.0.0"]
 kimi = ["openai>=1.0.0"]
+deepinfra = ["openai>=1.0.0"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
