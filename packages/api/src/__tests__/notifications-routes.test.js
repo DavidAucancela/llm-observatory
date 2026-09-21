@@ -54,7 +54,7 @@ describe('GET /api/notifications', () => {
     const invRow = await pool.query('SELECT token FROM invitations ORDER BY created_at DESC LIMIT 1');
     const acceptRes = await request(app)
       .post('/api/auth/accept-invite')
-      .send({ token: invRow.rows[0].token, password: 'TestPass123!' });
+      .send({ token: invRow.rows[0].token, email: 'newmember@test.com', password: 'TestPass123!' });
     expect(acceptRes.status).toBe(200);
 
     // Create a budget alert rule (will trigger on next metric over threshold)
@@ -89,14 +89,14 @@ describe('GET /api/notifications', () => {
     // for the bell, so "previous" is the 24h–48h band — seed at 36h to sit
     // safely inside it (exactly 48h falls off the edge by the time NOW() runs).
     // Current period must clear COST_SPIKE_MIN_ABS_USD ($0.50): 10 × $0.10 = $1.00.
-    const twoDaysAgo = new Date(Date.now() - 36 * 60 * 60 * 1000);
+    const prevPeriodAt = new Date(Date.now() - 36 * 60 * 60 * 1000);
 
     const pool = require('../db/pool');
     // Old call (previous period)
     await pool.query(
       `INSERT INTO api_calls (org_id, provider, model, input_tokens, output_tokens, total_tokens, cost_usd, latency_ms, status_code, timestamp)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [orgId, 'anthropic', 'claude-sonnet-4-6', 50, 25, 75, 0.0001, 100, 200, twoDaysAgo]
+      [orgId, 'anthropic', 'claude-sonnet-4-6', 50, 25, 75, 0.0001, 100, 200, prevPeriodAt]
     );
 
     // Current period: 10 requests at $0.10 each = $1.00 total (10000x spike)
@@ -121,11 +121,11 @@ describe('GET /api/notifications', () => {
 
     // Create cost spike condition
     const pool = require('../db/pool');
-    const twoDaysAgo = new Date(Date.now() - 36 * 60 * 60 * 1000);
+    const prevPeriodAt = new Date(Date.now() - 36 * 60 * 60 * 1000);
     await pool.query(
       `INSERT INTO api_calls (org_id, provider, model, input_tokens, output_tokens, total_tokens, cost_usd, latency_ms, status_code, timestamp)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [orgId, 'anthropic', 'claude-sonnet-4-6', 50, 25, 75, 0.0001, 100, 200, twoDaysAgo]
+      [orgId, 'anthropic', 'claude-sonnet-4-6', 50, 25, 75, 0.0001, 100, 200, prevPeriodAt]
     );
     for (let i = 0; i < 10; i++) {
       await createApiCall(obsToken, { cost_usd: 0.1 });
@@ -157,11 +157,11 @@ describe('GET /api/notifications', () => {
 
     // Create cost spike and budget alert
     const pool = require('../db/pool');
-    const twoDaysAgo = new Date(Date.now() - 36 * 60 * 60 * 1000);
+    const prevPeriodAt = new Date(Date.now() - 36 * 60 * 60 * 1000);
     await pool.query(
       `INSERT INTO api_calls (org_id, provider, model, input_tokens, output_tokens, total_tokens, cost_usd, latency_ms, status_code, timestamp)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [orgId, 'anthropic', 'claude-sonnet-4-6', 50, 25, 75, 0.0001, 100, 200, twoDaysAgo]
+      [orgId, 'anthropic', 'claude-sonnet-4-6', 50, 25, 75, 0.0001, 100, 200, prevPeriodAt]
     );
     for (let i = 0; i < 10; i++) {
       await createApiCall(obsToken, { cost_usd: 0.1 });
@@ -185,11 +185,11 @@ describe('GET /api/notifications', () => {
 
     // Create cost spike
     const pool = require('../db/pool');
-    const twoDaysAgo = new Date(Date.now() - 36 * 60 * 60 * 1000);
+    const prevPeriodAt = new Date(Date.now() - 36 * 60 * 60 * 1000);
     await pool.query(
       `INSERT INTO api_calls (org_id, provider, model, input_tokens, output_tokens, total_tokens, cost_usd, latency_ms, status_code, timestamp)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [orgId, 'anthropic', 'claude-sonnet-4-6', 50, 25, 75, 0.0001, 100, 200, twoDaysAgo]
+      [orgId, 'anthropic', 'claude-sonnet-4-6', 50, 25, 75, 0.0001, 100, 200, prevPeriodAt]
     );
     for (let i = 0; i < 10; i++) {
       await createApiCall(obsToken, { cost_usd: 0.1 });
@@ -225,11 +225,11 @@ describe('POST /api/notifications/read-all', () => {
       [orgId, 'anthropic', 0.5, 0.1]
     );
 
-    const twoDaysAgo = new Date(Date.now() - 36 * 60 * 60 * 1000);
+    const prevPeriodAt = new Date(Date.now() - 36 * 60 * 60 * 1000);
     await pool.query(
       `INSERT INTO api_calls (org_id, provider, model, input_tokens, output_tokens, total_tokens, cost_usd, latency_ms, status_code, timestamp)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [orgId, 'anthropic', 'claude-sonnet-4-6', 50, 25, 75, 0.0001, 100, 200, twoDaysAgo]
+      [orgId, 'anthropic', 'claude-sonnet-4-6', 50, 25, 75, 0.0001, 100, 200, prevPeriodAt]
     );
     for (let i = 0; i < 10; i++) {
       await createApiCall(obsToken, { cost_usd: 0.1 });
