@@ -3,6 +3,9 @@ dist/
 .env
 *.log
 .DS_Store
+__pycache__/
+*.pyc
+resultados oficiales/
 graphify-out/
 .claude/settings.local.json
 .claude/.claude/
