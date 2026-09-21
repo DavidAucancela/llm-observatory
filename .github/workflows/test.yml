@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e "packages/sdk-python[dev]" -q
+      - run: pip install -e "packages/sdk-python[dev,openai,gemini]" -q
       - run: cd packages/sdk-python && pytest tests/ -v
 
   api:
