@@ -99,3 +99,41 @@ class TestCacheTokens:
         with patch(f"llm_observatory.{module}.send_metric_background") as send:
             inst.chat.completions.create(model="m", messages=MSGS)
         assert send.call_args[0][1]["cache_read_tokens"] == 0
+
+    def test_sync_plain_usage_none_is_zero(self, module, cls, proxy, acls, aproxy, flat):
+        client = MagicMock()
+        client.chat.completions.create.return_value = _response(None)
+        inst = _build(module, cls, proxy, client)
+        with patch(f"llm_observatory.{module}.send_metric_background") as send:
+            inst.chat.completions.create(model="m", messages=MSGS)
+        metric = send.call_args[0][1]
+        assert metric["cache_read_tokens"] == 0
+        assert metric["input_tokens"] == 0
+
+    def test_sync_stream_usage_none_is_zero(self, module, cls, proxy, acls, aproxy, flat):
+        client = MagicMock()
+        client.chat.completions.create.return_value = iter([_chunk(), _chunk()])
+        inst = _build(module, cls, proxy, client)
+        with patch(f"llm_observatory.{module}.send_metric_background") as send:
+            list(inst.chat.completions.create(model="m", messages=MSGS, stream=True))
+        assert send.call_args[0][1]["cache_read_tokens"] == 0
+
+    async def test_async_plain_usage_none_is_zero(self, module, cls, proxy, acls, aproxy, flat):
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=_response(None))
+        inst = _build(module, acls, aproxy, client)
+        with patch(f"llm_observatory.{module}.send_metric_background_async", new=AsyncMock()) as send:
+            await inst.chat.completions.create(model="m", messages=MSGS)
+        assert send.call_args[0][1]["cache_read_tokens"] == 0
+
+    async def test_async_stream_usage_none_is_zero(self, module, cls, proxy, acls, aproxy, flat):
+        async def gen():
+            yield _chunk()
+
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=gen())
+        inst = _build(module, acls, aproxy, client)
+        with patch(f"llm_observatory.{module}.send_metric_background_async", new=AsyncMock()) as send:
+            stream = await inst.chat.completions.create(model="m", messages=MSGS, stream=True)
+            [c async for c in stream]
+        assert send.call_args[0][1]["cache_read_tokens"] == 0
