@@ -20,6 +20,24 @@ from ._utils import (
 )
 
 
+def _as_count(value: Any) -> int:
+    """Coerce a usage field to a non-negative int; anything else (missing, None,
+    a string, a mock) becomes 0 so a malformed response can't break the metric."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _cached_tokens_nested(usage: Any) -> int:
+    """Cached prompt tokens at ``usage.prompt_tokens_details.cached_tokens``
+    (OpenAI, Grok, DeepInfra). Mirrors Node's extractCachedTokensNested."""
+    return _as_count(getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", 0))
+
+
+def _cached_tokens_flat(usage: Any) -> int:
+    """Cached prompt tokens at ``usage.cached_tokens`` (Kimi/Moonshot).
+    Mirrors Node's extractCachedTokensFlat."""
+    return _as_count(getattr(usage, "cached_tokens", 0))
+
+
 def _accumulate_stream_delta(chunk: Any, text_parts: list[str], tool_calls_map: dict[int, dict[str, str]]) -> str | None:
     """Feed one streaming chunk into the accumulators; returns finish_reason if present.
     OpenAI streams tool_calls as fragments (index + partial `arguments` string) across
@@ -97,6 +115,7 @@ class _CompletionsProxy:
         usage = getattr(response, "usage", None) if response else None
         input_t  = getattr(usage, "prompt_tokens",     0) if usage else 0
         output_t = getattr(usage, "completion_tokens", 0) if usage else 0
+        cache_t  = _cached_tokens_nested(usage) if usage else 0
         response_details = extract_openai_response_details(response) if response else {
             "response_full": None, "tool_calls": [], "stop_reason": None,
         }
@@ -107,6 +126,8 @@ class _CompletionsProxy:
             "input_tokens":   input_t,
             "output_tokens":  output_t,
             "total_tokens":   input_t + output_t,
+            "cache_read_tokens":  cache_t,
+            "cache_write_tokens": 0,
             "cost_usd":       calculate_openai_cost(params["model"], input_t, output_t),
             "latency_ms":     int((time.perf_counter() - start) * 1000),
             "status_code":    status_code,
@@ -167,7 +188,7 @@ class _CompletionsProxy:
         tools: list[str],
         request_details: dict[str, Any],
     ) -> Iterator[Any]:
-        input_t = output_t = 0
+        input_t = output_t = cache_t = 0
         text_parts: list[str] = []
         tool_calls_map: dict[int, dict[str, str]] = {}
         stop_reason = None
@@ -177,6 +198,7 @@ class _CompletionsProxy:
                 if usage:
                     input_t  = getattr(usage, "prompt_tokens",     input_t)
                     output_t = getattr(usage, "completion_tokens", output_t)
+                    cache_t  = _cached_tokens_nested(usage)
                 finish_reason = _accumulate_stream_delta(chunk, text_parts, tool_calls_map)
                 stop_reason = finish_reason or stop_reason
                 yield chunk
@@ -188,6 +210,8 @@ class _CompletionsProxy:
                 "input_tokens":   input_t,
                 "output_tokens":  output_t,
                 "total_tokens":   input_t + output_t,
+                "cache_read_tokens":  cache_t,
+                "cache_write_tokens": 0,
                 "cost_usd":       calculate_openai_cost(params["model"], input_t, output_t),
                 "latency_ms":     int((time.perf_counter() - start) * 1000),
                 "status_code":    200,
@@ -271,6 +295,7 @@ class _AsyncCompletionsProxy:
         usage = getattr(response, "usage", None) if response else None
         input_t  = getattr(usage, "prompt_tokens",     0) if usage else 0
         output_t = getattr(usage, "completion_tokens", 0) if usage else 0
+        cache_t  = _cached_tokens_nested(usage) if usage else 0
         response_details = extract_openai_response_details(response) if response else {
             "response_full": None, "tool_calls": [], "stop_reason": None,
         }
@@ -281,6 +306,8 @@ class _AsyncCompletionsProxy:
             "input_tokens":   input_t,
             "output_tokens":  output_t,
             "total_tokens":   input_t + output_t,
+            "cache_read_tokens":  cache_t,
+            "cache_write_tokens": 0,
             "cost_usd":       calculate_openai_cost(params["model"], input_t, output_t),
             "latency_ms":     int((time.perf_counter() - start) * 1000),
             "status_code":    status_code,
@@ -340,7 +367,7 @@ class _AsyncCompletionsProxy:
         tools: list[str],
         request_details: dict[str, Any],
     ) -> AsyncIterator[Any]:
-        input_t = output_t = 0
+        input_t = output_t = cache_t = 0
         text_parts: list[str] = []
         tool_calls_map: dict[int, dict[str, str]] = {}
         stop_reason = None
@@ -350,6 +377,7 @@ class _AsyncCompletionsProxy:
                 if usage:
                     input_t  = getattr(usage, "prompt_tokens",     input_t)
                     output_t = getattr(usage, "completion_tokens", output_t)
+                    cache_t  = _cached_tokens_nested(usage)
                 finish_reason = _accumulate_stream_delta(chunk, text_parts, tool_calls_map)
                 stop_reason = finish_reason or stop_reason
                 yield chunk
@@ -361,6 +389,8 @@ class _AsyncCompletionsProxy:
                 "input_tokens":   input_t,
                 "output_tokens":  output_t,
                 "total_tokens":   input_t + output_t,
+                "cache_read_tokens":  cache_t,
+                "cache_write_tokens": 0,
                 "cost_usd":       calculate_openai_cost(params["model"], input_t, output_t),
                 "latency_ms":     int((time.perf_counter() - start) * 1000),
                 "status_code":    200,
