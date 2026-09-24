@@ -209,6 +209,36 @@ class TestMonitoredDeepInfraAsync:
         assert metric["cost_usd"] == pytest.approx(0.77)
 
 
+    async def test_async_stream_yields_chunks(self):
+        """Regression test: create(stream=True) must return an awaited async
+        generator, not an un-awaited coroutine (async for on the latter raises
+        TypeError: 'coroutine' object is not async iterable)."""
+        from llm_observatory.deepinfra import AsyncMonitoredDeepInfra, _AsyncDeepInfraChatProxy
+
+        chunks = [MagicMock() for _ in range(3)]
+        for c in chunks:
+            c.usage = None
+
+        async def _fake_stream():
+            for c in chunks:
+                yield c
+
+        instance = object.__new__(AsyncMonitoredDeepInfra)
+        instance._observatory_url = "http://obs:3001"
+        instance._observatory_token = "obs_sk_test"
+        instance._tags = {}
+        instance._api_key_hint = "di-…5678"
+        instance._client = MagicMock()
+        instance._client.chat.completions.create = AsyncMock(return_value=_fake_stream())
+        instance.chat = _AsyncDeepInfraChatProxy(instance)
+
+        with patch("llm_observatory.deepinfra.send_metric_background_async", new=AsyncMock()):
+            stream = await instance.chat.completions.create(model=MODEL, messages=MSGS, stream=True)
+            result = [c async for c in stream]
+
+        assert len(result) == 3
+
+
     async def test_async_sends_metric_and_reraises_on_error(self):
         from llm_observatory.deepinfra import AsyncMonitoredDeepInfra, _AsyncDeepInfraChatProxy
 

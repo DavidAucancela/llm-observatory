@@ -100,7 +100,10 @@ const KIMI_PRICING = {
   'kimi-k2.7-code-highspeed':  { input: 1.90, output:  8.00 },
 };
 
-// Cost per million tokens (USD) — per deepinfra.com/pricing, read 2026-09-21.
+// Cost per million tokens (USD) — per deepinfra.com/pricing, spot-checked
+// against the live rendered page (and each model's own page for ones not on
+// the pricing page's featured list) on 2026-09-23: all 15 rates below are
+// confirmed accurate as of that date.
 // DeepInfra hosts hundreds of models and reprices them often, so this covers
 // only the popular ones: a model missing here prices at $0 and is flagged
 // cost_confidence='unknown' (see finalizeMetricPricing) instead of guessing.
@@ -116,6 +119,9 @@ const DEEPINFRA_PRICING = {
   'deepseek-ai/DeepSeek-V3.1':                   { input: 0.25,  output:  0.95 },
   'deepseek-ai/DeepSeek-V3':                     { input: 0.32,  output:  0.89 },
   'moonshotai/Kimi-K3':                          { input: 2.85,  output: 14.25 },
+  // Deprecated by DeepInfra on 2026-09-29 (low usage) — still priced correctly
+  // as of that date, but will start returning $0/unknown for real calls once
+  // the model is pulled. Remove this row (or replace with its successor) then.
   'moonshotai/Kimi-K2.7-Code':                   { input: 0.68,  output:  3.40 },
   'Qwen/Qwen3-Max':                              { input: 1.20,  output:  6.00 },
   'google/gemma-4-31B-it':                       { input: 0.13,  output:  0.38 },
@@ -386,10 +392,10 @@ function calculateDeepInfraCost(model, inputTokens, outputTokens) {
   return (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output;
 }
 
-// DeepInfra may report the billed cost of a request inside `usage`. The field
-// name is not in their public docs, so accept the two plausible spellings and
-// only trust a finite, non-negative number — anything else falls back to the
-// pricing table. Unverified against a live response: confirm with a real call.
+// DeepInfra reports the billed cost of a request in USD as `usage.estimated_cost`
+// (verified against a live response 2026-09-23; not in their public docs).
+// `estimated_cost_usd` is kept as a defensive alternate spelling. Only trust a
+// finite, non-negative number — anything else falls back to the pricing table.
 function extractDeepInfraCost(usage) {
   const raw = usage?.estimated_cost ?? usage?.estimated_cost_usd;
   return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : null;

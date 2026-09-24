@@ -28,11 +28,11 @@ DEEPINFRA_BASE_URL = "https://api.deepinfra.com/v1/openai"
 
 
 def _reported_cost(usage: Any) -> float | None:
-    """The billed cost DeepInfra may report inside ``usage``. The field name is
-    not in their public docs, so accept the two plausible spellings and only
+    """The billed cost DeepInfra reports in USD as ``usage.estimated_cost``
+    (verified against a live response 2026-09-23; not in their public docs).
+    ``estimated_cost_usd`` is kept as a defensive alternate spelling. Only
     trust a finite, non-negative number — anything else (missing, a string, a
-    mock) returns None and the caller falls back to the pricing table.
-    Unverified against a live response: confirm with a real call."""
+    mock) returns None and the caller falls back to the pricing table."""
     if usage is None:
         return None
     raw = getattr(usage, "estimated_cost", None)
@@ -248,7 +248,11 @@ class _AsyncDeepInfraCompletionsProxy:
         }
 
         if params.get("stream"):
-            return self._create_stream(params, start, prompt_preview, tools, request_details)
+            # _create_stream is `async def` but has no `yield` of its own — it just
+            # awaits the API call and returns the real async generator from
+            # _stream_generator(). Without this await, callers get back an
+            # un-awaited coroutine instead of an async-iterable stream.
+            return await self._create_stream(params, start, prompt_preview, tools, request_details)
 
         response = None
         status_code = 200
