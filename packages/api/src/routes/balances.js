@@ -5,7 +5,7 @@ const { decrypt } = require('../db/crypto');
 const { requireAdmin } = require('../middleware/auth');
 const { PROVIDERS, PROVIDER_CAPS, requiresAccountId } = require('../constants/providers');
 const { fetchGrokPrepaidBalance } = require('../services/providerUsage');
-const { appendTimeWindow } = require('../utils/dateRange');
+const { appendTimeWindow, rangeMiddleware } = require('../utils/dateRange');
 
 const router = express.Router();
 
@@ -30,16 +30,13 @@ const BalanceSchema = z.object({
   note:       z.string().max(200).optional(),
 });
 
-router.get('/', async (req, res) => {
+// 'all' isn't exposed by the range picker (no UI sends it) but is kept as a
+// valid value for any future/direct caller wanting unfiltered spend.
+router.get('/', rangeMiddleware({ allowAll: true }), async (req, res) => {
   try {
     const { orgId } = req.user;
-    const range = req.query.range || '30d';
     const spendingParams = [orgId];
-    // 'all' isn't exposed by the range picker (no UI sends it) but is kept as
-    // a valid value for any future/direct caller wanting unfiltered spend.
-    const timeWindow = range === 'all'
-      ? 'TRUE'
-      : appendTimeWindow(spendingParams, { range, start: req.query.start, end: req.query.end });
+    const timeWindow = appendTimeWindow(spendingParams, req.dateRange);
 
     const [balances, spending] = await Promise.all([
       pool.query(
@@ -47,9 +44,14 @@ router.get('/', async (req, res) => {
         [orgId]
       ),
       pool.query(
-        `SELECT provider, COALESCE(SUM(cost_usd), 0) as spent
+        // `spent` is the selected window (what the page shows as "spent");
+        // `spent_all` is lifetime spend, the only figure that can be compared to
+        // lifetime recharges to get a balance.
+        `SELECT provider,
+                COALESCE(SUM(cost_usd) FILTER (WHERE ${timeWindow}), 0) as spent,
+                COALESCE(SUM(cost_usd), 0) as spent_all
          FROM api_calls
-         WHERE org_id = $1 AND ${timeWindow}
+         WHERE org_id = $1
          GROUP BY provider`,
         spendingParams
       ),
@@ -63,17 +65,22 @@ router.get('/', async (req, res) => {
     }
 
     const totalSpent = Object.fromEntries(PROVIDERS.map(p => [p, 0]));
+    const spentAll   = Object.fromEntries(PROVIDERS.map(p => [p, 0]));
     for (const s of spending.rows) {
       totalSpent[s.provider] = parseFloat(s.spent);
+      spentAll[s.provider]   = parseFloat(s.spent_all);
     }
 
     const providers = PROVIDERS.map(p => ({
       provider:     p,
       total_loaded: totalLoaded[p] || 0,
       total_spent:  totalSpent[p]  || 0,
-      remaining:    Math.max(0, (totalLoaded[p] || 0) - (totalSpent[p] || 0)),
+      // Balance figures use lifetime spend so they don't change with the date
+      // filter (lifetime recharges minus range-only spend made 24h look nearly
+      // unspent). `total_spent` alone follows the selected window.
+      remaining:    Math.max(0, (totalLoaded[p] || 0) - (spentAll[p] || 0)),
       pct_used:     totalLoaded[p] > 0
-        ? Math.min(100, ((totalSpent[p] || 0) / totalLoaded[p]) * 100)
+        ? Math.min(100, ((spentAll[p] || 0) / totalLoaded[p]) * 100)
         : 0,
     }));
 

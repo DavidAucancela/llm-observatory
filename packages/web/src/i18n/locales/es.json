@@ -37,7 +37,12 @@
     "rangeCustom": "Personalizado",
     "rangeFrom": "Desde",
     "rangeTo": "Hasta",
-    "rangeApply": "Aplicar"
+    "rangeApply": "Aplicar",
+    "rangeErrInvalid": "Ingresa fechas válidas",
+    "rangeErrOrder": "El inicio debe ser anterior o igual al fin",
+    "rangeErrFuture": "Las fechas no pueden ser futuras",
+    "rangeErrTooLong": "Rango demasiado largo (máx. 366 días)",
+    "rangeUtcHint": "Los días son UTC"
   },
   "common": {
     "save": "Guardar",

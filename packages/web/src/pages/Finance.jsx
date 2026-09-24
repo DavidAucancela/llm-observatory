@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ProviderBadge from '../components/ProviderBadge';
@@ -94,14 +94,23 @@ function BalancesTab({ rangeParams, configuredProviders, onChanged }) {
   const { t } = useTranslation();
   const rangeQuery = new URLSearchParams(rangeParams).toString();
 
+  // Latest-request-wins: fetchData is also called after add/delete, and a slow
+  // response for a previous range must not overwrite the current one.
+  const fetchSeq = useRef(0);
   const fetchData = async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     setError(null);
     try {
       const res = await apiFetch(`/api/balances?${rangeQuery}`);
-      setData(await res.json());
-    } catch (err) { console.error(err); setError(t('finance.loadError') || 'Failed to load balances'); }
-    finally { setLoading(false); }
+      const json = await res.json();
+      if (seq !== fetchSeq.current) return;
+      setData(json);
+    } catch (err) {
+      if (seq !== fetchSeq.current) return;
+      console.error(err); setError(t('finance.loadError') || 'Failed to load balances');
+    }
+    finally { if (seq === fetchSeq.current) setLoading(false); }
   };
 
   useEffect(() => { fetchData(); }, [rangeQuery]);

@@ -5,9 +5,7 @@ import { useAuth } from '../auth/AuthProvider';
 import NotificationBell from './NotificationBell';
 import { useSidebar } from '../contexts/SidebarContext';
 import { fmtRangeShort } from '../utils/fmt';
-import { RANGE_LABEL_I18N_KEYS } from '../utils/dateRange';
-
-const TODAY = new Date().toISOString().slice(0, 10);
+import { RANGE_LABEL_I18N_KEYS, todayUtc, customRangeError } from '../utils/dateRange';
 
 function IconHamburger() {
   return (
@@ -161,6 +159,9 @@ export default function TopBar({
   const [customOpen, setCustomOpen] = useState(false);
   const [draftStart, setDraftStart] = useState('');
   const [draftEnd, setDraftEnd] = useState('');
+  // UTC "today", refreshed every time the panel opens (a module-level constant
+  // would go stale in a tab left open past midnight).
+  const [today, setToday] = useState(todayUtc);
   const wrapRef = useRef(null);
 
   useEffect(() => {
@@ -175,10 +176,13 @@ export default function TopBar({
     // for a first-time pick) every time the panel opens, not just on mount.
     setDraftStart(customRange?.start || '');
     setDraftEnd(customRange?.end || '');
+    setToday(todayUtc());
     setCustomOpen(o => !o);
   };
 
-  const canApply = draftStart && draftEnd && draftStart <= draftEnd;
+  // Typed input can bypass the inputs' min/max, so validate the values themselves.
+  const draftError = customRangeError(draftStart, draftEnd, today);
+  const canApply = Boolean(draftStart && draftEnd) && !draftError;
   const customLabel = range === 'custom' && customRange?.start && customRange?.end
     ? fmtRangeShort(customRange.start, customRange.end, i18n.language)
     : t('topbar.rangeCustom');
@@ -222,7 +226,7 @@ export default function TopBar({
                   <label htmlFor="range-from">{t('topbar.rangeFrom')}</label>
                   <input
                     id="range-from" type="date" className="obs-input"
-                    value={draftStart} max={draftEnd || TODAY}
+                    value={draftStart} max={draftEnd || today}
                     onChange={e => setDraftStart(e.target.value)}
                   />
                 </div>
@@ -230,9 +234,12 @@ export default function TopBar({
                   <label htmlFor="range-to">{t('topbar.rangeTo')}</label>
                   <input
                     id="range-to" type="date" className="obs-input"
-                    value={draftEnd} min={draftStart || undefined} max={TODAY}
+                    value={draftEnd} min={draftStart || undefined} max={today}
                     onChange={e => setDraftEnd(e.target.value)}
                   />
+                </div>
+                <div style={{ fontSize: 11, color: draftError ? 'var(--danger, #e5484d)' : 'var(--text-muted, inherit)', opacity: draftError ? 1 : 0.7 }} role={draftError ? 'alert' : undefined}>
+                  {draftError ? t(draftError) : t('topbar.rangeUtcHint')}
                 </div>
                 <button
                   type="button"
