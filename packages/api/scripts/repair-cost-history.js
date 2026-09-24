@@ -48,8 +48,8 @@ function rowTokens(row) {
 }
 
 async function pass1Reprice() {
-  const params = ORG_ID ? [SYNC_PROVIDERS.concat(['gemini', 'grok', 'kimi']), ORG_ID]
-                        : [SYNC_PROVIDERS.concat(['gemini', 'grok', 'kimi'])];
+  const params = ORG_ID ? [SYNC_PROVIDERS.concat(['gemini', 'grok', 'kimi', 'deepinfra']), ORG_ID]
+                        : [SYNC_PROVIDERS.concat(['gemini', 'grok', 'kimi', 'deepinfra'])];
   const { rows } = await pool.query(
     `SELECT id, provider, model, input_tokens, output_tokens,
             cache_read_tokens, cache_write_tokens

@@ -8,8 +8,9 @@
 - `MonitoredGemini`, `AsyncMonitoredGemini` — Wraps `google.genai.Client` (sync surface + its `.aio` namespace for async — there is no separate async client class), intercepts `models.generate_content()` / `models.generate_content_stream()`. Implemented from scratch (not OpenAI-compatible, unlike Grok/Kimi) — see the implementation note below.
 - `MonitoredGrok`, `AsyncMonitoredGrok` — xAI's Grok. Also wraps `openai.OpenAI` / `openai.AsyncOpenAI` (Grok's API is OpenAI-compatible), pinned to `base_url="https://api.x.ai/v1"`
 - `MonitoredKimi`, `AsyncMonitoredKimi` — Moonshot AI's Kimi. Same pattern, `base_url="https://api.moonshot.ai/v1"`
-- `calculate_cost()`, `calculate_openai_cost()`, `calculate_gemini_cost()`, `calculate_grok_cost()`, `calculate_kimi_cost()` — Pricing helpers
-- `ANTHROPIC_PRICING`, `OPENAI_PRICING`, `GEMINI_PRICING`, `GROK_PRICING`, `KIMI_PRICING` — Pricing tables
+- `MonitoredDeepInfra`, `AsyncMonitoredDeepInfra` — DeepInfra. Same pattern, `base_url="https://api.deepinfra.com/v1/openai"`, key from `api_key` / `DEEPINFRA_API_KEY` / `DEEPINFRA_TOKEN`. Prefers a cost reported in `usage.estimated_cost` (or `estimated_cost_usd`; field name unverified) over the pricing table; a model missing from the table records $0 and is flagged `cost_confidence="unknown"`.
+- `calculate_cost()`, `calculate_openai_cost()`, `calculate_gemini_cost()`, `calculate_grok_cost()`, `calculate_kimi_cost()`, `calculate_deepinfra_cost()` — Pricing helpers
+- `ANTHROPIC_PRICING`, `OPENAI_PRICING`, `GEMINI_PRICING`, `GROK_PRICING`, `KIMI_PRICING`, `DEEPINFRA_PRICING` — Pricing tables (`DEEPINFRA_PRICING` must stay identical to the Node SDK's — `tests/test_pricing.py` parses `packages/sdk/src/index.js` to enforce it)
 
 **Install:**
 ```bash
@@ -18,6 +19,7 @@ pip install -e "packages/sdk-python[openai]"    # With OpenAI support
 pip install -e "packages/sdk-python[gemini]"    # With Gemini support (installs google-genai)
 pip install -e "packages/sdk-python[grok]"      # With Grok support (installs openai — same underlying package)
 pip install -e "packages/sdk-python[kimi]"      # With Kimi support (installs openai — same underlying package)
+pip install -e "packages/sdk-python[deepinfra]" # With DeepInfra support (installs openai — same underlying package)
 ```
 
 **Constructor options (all classes share the same signature):**
@@ -67,7 +69,7 @@ llm_observatory/
 └── _pricing.py      Pricing tables (keep in sync with Node.js SDK)
 ```
 
-**Grok/Kimi implementation note:** both providers expose an OpenAI-shaped `chat.completions` API, so `grok.py`/`kimi.py` construct a real `openai.OpenAI`/`openai.AsyncOpenAI` client pointed at the provider's `base_url` rather than talking to the provider directly — same approach as the Node SDK. Neither file duplicates the streaming/tool-call-accumulation logic; both import `_accumulate_stream_delta`/`_finalize_stream_response` straight from `openai.py`. No admin-key historical sync or Costs-API reconciliation for either provider (see `packages/sdk/CLAUDE.md` — neither xAI's nor Moonshot's API exposes an org-level usage/billing endpoint). Gemini has the same "no admin-key sync" limitation despite being implemented from scratch rather than OpenAI-compatible.
+**Grok/Kimi/DeepInfra implementation note:** all three providers expose an OpenAI-shaped `chat.completions` API, so `grok.py`/`kimi.py` construct a real `openai.OpenAI`/`openai.AsyncOpenAI` client pointed at the provider's `base_url` rather than talking to the provider directly — same approach as the Node SDK. Neither file duplicates the streaming/tool-call-accumulation logic; both import `_accumulate_stream_delta`/`_finalize_stream_response` straight from `openai.py`. No admin-key historical sync or Costs-API reconciliation for either provider (see `packages/sdk/CLAUDE.md` — neither xAI's nor Moonshot's API exposes an org-level usage/billing endpoint). Gemini has the same "no admin-key sync" limitation despite being implemented from scratch rather than OpenAI-compatible.
 
 **Tests:**
 ```bash

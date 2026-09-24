@@ -100,6 +100,38 @@ const KIMI_PRICING = {
   'kimi-k2.7-code-highspeed':  { input: 1.90, output:  8.00 },
 };
 
+// Cost per million tokens (USD) — per deepinfra.com/pricing, spot-checked
+// against the live rendered page (and each model's own page for ones not on
+// the pricing page's featured list) on 2026-09-23: all 15 rates below are
+// confirmed accurate as of that date.
+// DeepInfra hosts hundreds of models and reprices them often, so this covers
+// only the popular ones: a model missing here prices at $0 and is flagged
+// cost_confidence='unknown' (see finalizeMetricPricing) instead of guessing.
+// When the API response carries its own cost (see extractDeepInfraCost) that
+// figure wins over this table. Cache-miss (standard) rate only — same
+// simplification as GROK_PRICING/KIMI_PRICING above. Ids are DeepInfra's own
+// `org/Model` form and are case-sensitive.
+const DEEPINFRA_PRICING = {
+  'deepseek-ai/DeepSeek-V4-Flash-0731':          { input: 0.06,  output:  0.18 },
+  'deepseek-ai/DeepSeek-V4-Flash':               { input: 0.09,  output:  0.18 },
+  'deepseek-ai/DeepSeek-V4-Pro':                 { input: 1.30,  output:  2.60 },
+  'deepseek-ai/DeepSeek-V3.2':                   { input: 0.26,  output:  0.38 },
+  'deepseek-ai/DeepSeek-V3.1':                   { input: 0.25,  output:  0.95 },
+  'deepseek-ai/DeepSeek-V3':                     { input: 0.32,  output:  0.89 },
+  'moonshotai/Kimi-K3':                          { input: 2.85,  output: 14.25 },
+  // Deprecated by DeepInfra on 2026-09-29 (low usage) — still priced correctly
+  // as of that date, but will start returning $0/unknown for real calls once
+  // the model is pulled. Remove this row (or replace with its successor) then.
+  'moonshotai/Kimi-K2.7-Code':                   { input: 0.68,  output:  3.40 },
+  'Qwen/Qwen3-Max':                              { input: 1.20,  output:  6.00 },
+  'google/gemma-4-31B-it':                       { input: 0.13,  output:  0.38 },
+  'google/gemini-2.5-flash':                     { input: 0.30,  output:  2.50 },
+  'anthropic/claude-sonnet-5':                   { input: 3.00,  output: 15.00 },
+  'meta-llama/Llama-3.3-70B-Instruct-Turbo':     { input: 0.10,  output:  0.32 },
+  'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo': { input: 0.02,  output:  0.04 },
+  'mistralai/Mistral-Nemo-Instruct-2407':        { input: 0.019, output:  0.03 },
+};
+
 // Chat/text pricing tables keyed by provider — used to normalize the model id
 // and to decide cost_confidence. Embeddings/Whisper/TTS have their own tables
 // and are handled by the cost_usd===0 guard in finalizeMetricPricing.
@@ -109,6 +141,7 @@ const PROVIDER_PRICING = {
   gemini:    GEMINI_PRICING,
   grok:      GROK_PRICING,
   kimi:      KIMI_PRICING,
+  deepinfra: DEEPINFRA_PRICING,
 };
 
 const MODEL_SNAPSHOT_SUFFIX_RE = /-(\d{8}|\d{4}-\d{2}-\d{2})$/;
@@ -348,6 +381,24 @@ function calculateKimiCost(model, inputTokens, outputTokens) {
     return 0;
   }
   return (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output;
+}
+
+function calculateDeepInfraCost(model, inputTokens, outputTokens) {
+  const pricing = DEEPINFRA_PRICING[normalizeModelId(model, DEEPINFRA_PRICING)];
+  if (!pricing) {
+    console.warn(`[LLM Observatory] Unknown DeepInfra model pricing: "${model}" — cost recorded as $0`);
+    return 0;
+  }
+  return (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output;
+}
+
+// DeepInfra reports the billed cost of a request in USD as `usage.estimated_cost`
+// (verified against a live response 2026-09-23; not in their public docs).
+// `estimated_cost_usd` is kept as a defensive alternate spelling. Only trust a
+// finite, non-negative number — anything else falls back to the pricing table.
+function extractDeepInfraCost(usage) {
+  const raw = usage?.estimated_cost ?? usage?.estimated_cost_usd;
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : null;
 }
 
 class MonitoredAnthropic {
@@ -894,7 +945,15 @@ function extractCachedTokensFlat(usage) {
   return usage?.cached_tokens || 0;
 }
 
-function buildOpenAICompatibleChatProxy(self, { provider, calculateCostFn, extractCacheReadTokens }) {
+// `extractCostFn(usage)` is optional: a provider that reports the billed cost
+// in the response (DeepInfra) returns it here and it overrides the table-based
+// `calculateCostFn`; returning null/undefined falls back to the table.
+function resolveOpenAICompatibleCost(calculateCostFn, extractCostFn, model, usage, inputTokens, outputTokens) {
+  const reported = extractCostFn && usage ? extractCostFn(usage) : null;
+  return reported != null ? reported : calculateCostFn(model, inputTokens, outputTokens);
+}
+
+function buildOpenAICompatibleChatProxy(self, { provider, calculateCostFn, extractCacheReadTokens, extractCostFn }) {
   return {
     create: async (params) => {
       const startTime = Date.now();
@@ -923,7 +982,7 @@ function buildOpenAICompatibleChatProxy(self, { provider, calculateCostFn, extra
         }
 
         return wrapOpenAICompatibleStream(self, stream, startTime, params, tools, promptPreview,
-          { promptFull, systemPrompt, requestParams }, { provider, calculateCostFn, extractCacheReadTokens });
+          { promptFull, systemPrompt, requestParams }, { provider, calculateCostFn, extractCacheReadTokens, extractCostFn });
       }
 
       let response, statusCode = 200, error = null;
@@ -945,7 +1004,7 @@ function buildOpenAICompatibleChatProxy(self, { provider, calculateCostFn, extra
         provider, model: params.model,
         input_tokens: inputTokens, output_tokens: outputTokens,
         total_tokens: inputTokens + outputTokens,
-        cost_usd: calculateCostFn(params.model, inputTokens, outputTokens),
+        cost_usd: resolveOpenAICompatibleCost(calculateCostFn, extractCostFn, params.model, response?.usage, inputTokens, outputTokens),
         latency_ms: Date.now() - startTime, status_code: statusCode,
         cache_read_tokens: cacheReadTokens, cache_write_tokens: 0,
         error_message: error ? (error.message || null) : null,
@@ -962,8 +1021,9 @@ function buildOpenAICompatibleChatProxy(self, { provider, calculateCostFn, extra
   };
 }
 
-async function* wrapOpenAICompatibleStream(self, stream, startTime, params, tools, promptPreview, requestDetails, { provider, calculateCostFn, extractCacheReadTokens }) {
+async function* wrapOpenAICompatibleStream(self, stream, startTime, params, tools, promptPreview, requestDetails, { provider, calculateCostFn, extractCacheReadTokens, extractCostFn }) {
   let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0;
+  let finalUsage = null;
   let responseText = '';
   let stopReason = null;
   const toolCallsMap = new Map();
@@ -973,6 +1033,7 @@ async function* wrapOpenAICompatibleStream(self, stream, startTime, params, tool
         inputTokens     = chunk.usage.prompt_tokens     || 0;
         outputTokens    = chunk.usage.completion_tokens || 0;
         cacheReadTokens = extractCacheReadTokens(chunk.usage);
+        finalUsage      = chunk.usage;
       }
       const choice = chunk.choices?.[0];
       if (choice?.delta?.content) responseText += choice.delta.content;
@@ -996,7 +1057,7 @@ async function* wrapOpenAICompatibleStream(self, stream, startTime, params, tool
       provider, model: params.model,
       input_tokens: inputTokens, output_tokens: outputTokens,
       total_tokens: inputTokens + outputTokens,
-      cost_usd: calculateCostFn(params.model, inputTokens, outputTokens),
+      cost_usd: resolveOpenAICompatibleCost(calculateCostFn, extractCostFn, params.model, finalUsage, inputTokens, outputTokens),
       latency_ms: Date.now() - startTime, status_code: 200,
       cache_read_tokens: cacheReadTokens, cache_write_tokens: 0,
       tools_used: tools, prompt_preview: promptPreview, tags: self.tags,
@@ -1049,12 +1110,40 @@ class MonitoredKimi {
   }
 }
 
+// DeepInfra also speaks the OpenAI chat.completions dialect (base URL below), so
+// it reuses the shared proxy. Unlike Grok/Kimi it can report the billed cost in
+// the response, so it passes extractCostFn. Cached prompt tokens are reported
+// OpenAI-style under prompt_tokens_details.
+class MonitoredDeepInfra {
+  constructor(options = {}) {
+    const { observatoryUrl = 'http://localhost:3001', observatoryToken, apiKey, tags = {}, ...deepinfraOptions } = options;
+    this.observatoryUrl   = observatoryUrl;
+    this.observatoryToken = observatoryToken;
+    this.tags       = tags;
+    const key = apiKey || process.env.DEEPINFRA_API_KEY || process.env.DEEPINFRA_TOKEN;
+    this.apiKeyHint = maskKey(key);
+    const OpenAI = require('openai');
+    this.client = new OpenAI({ apiKey: key, baseURL: 'https://api.deepinfra.com/v1/openai', ...deepinfraOptions });
+    this.chat = {
+      completions: buildOpenAICompatibleChatProxy(this, {
+        provider: 'deepinfra', calculateCostFn: calculateDeepInfraCost,
+        extractCacheReadTokens: extractCachedTokensNested, extractCostFn: extractDeepInfraCost,
+      }),
+    };
+  }
+
+  async _sendMetric(data) {
+    await _postMetric(`${this.observatoryUrl}/api/metrics`, data, this.observatoryToken);
+  }
+}
+
 module.exports = {
   MonitoredAnthropic,
   MonitoredOpenAI,
   MonitoredGemini,
   MonitoredGrok,
   MonitoredKimi,
+  MonitoredDeepInfra,
   maskKey,
   classifyError,
   calculateCost,
@@ -1065,6 +1154,7 @@ module.exports = {
   calculateGeminiCost,
   calculateGrokCost,
   calculateKimiCost,
+  calculateDeepInfraCost,
   normalizeModelId,
   finalizeMetricPricing,
   ANTHROPIC_PRICING,
@@ -1075,4 +1165,5 @@ module.exports = {
   GEMINI_PRICING,
   GROK_PRICING,
   KIMI_PRICING,
+  DEEPINFRA_PRICING,
 };

@@ -144,7 +144,7 @@ router.post('/:id/ping', requireAdmin, async (req, res, next) => {
     const { provider, key_hint } = row.rows[0];
     const PING_MODEL = {
       anthropic: 'claude-haiku-4-5-20251001', gemini: 'gemini-3.5-flash', openai: 'gpt-4o-mini',
-      grok: 'grok-4.6', kimi: 'kimi-k2.6',
+      grok: 'grok-4.6', kimi: 'kimi-k2.6', deepinfra: 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
     };
     const model = PING_MODEL[provider];
 
@@ -246,6 +246,16 @@ const PROVIDER_TESTERS = {
       return response.status === 200
         ? { valid: true, error: null }
         : { valid: false, error: `Moonshot API respondió con ${response.status}` };
+    },
+  },
+  deepinfra: {
+    async sdk(apiKey) {
+      const response = await fetchWithTimeout('https://api.deepinfra.com/v1/openai/models', {
+        headers: { Authorization: `Bearer ${apiKey}` }
+      });
+      return response.status === 200
+        ? { valid: true, error: null }
+        : { valid: false, error: `DeepInfra API respondió con ${response.status}` };
     },
   },
 };

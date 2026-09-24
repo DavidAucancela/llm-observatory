@@ -9,6 +9,7 @@ export const PROVIDER_COLORS = {
   gemini: 'var(--gemini)',
   grok: 'var(--grok)',
   kimi: 'var(--kimi)',
+  deepinfra: 'var(--deepinfra)',
 };
 
 export const PROVIDER_LABELS = {
@@ -17,6 +18,7 @@ export const PROVIDER_LABELS = {
   gemini: 'Gemini',
   grok: 'Grok',
   kimi: 'Kimi',
+  deepinfra: 'DeepInfra',
 };
 
 // Matches index.css's :root values — used only as a fallback when
@@ -28,6 +30,7 @@ const PROVIDER_HEX_FALLBACK = {
   gemini: '#4285F4',
   grok: '#3F3F46',
   kimi: '#0D9488',
+  deepinfra: '#7C3AED',
 };
 
 // Lightness deltas (HSL percentage points) applied per index-within-provider

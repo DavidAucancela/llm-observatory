@@ -25,6 +25,7 @@ const JUDGE_MODEL = {
   gemini:    { model: 'gemini-3.5-flash',          pricing: { input: 1.50, output: 9.00 } },
   grok:      { model: 'grok-4.6',                  pricing: { input: 2.00, output: 6.00 } },
   kimi:      { model: 'kimi-k2.6',                 pricing: { input: 0.95, output: 4.00 } },
+  deepinfra: { model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', pricing: { input: 0.10, output: 0.32 } },
 };
 
 // Providers whose chat completion endpoint has the OpenAI request/response
@@ -33,6 +34,7 @@ const OPENAI_SHAPED_BASE_URL = {
   openai: 'https://api.openai.com/v1',
   grok:   'https://api.x.ai/v1',
   kimi:   'https://api.moonshot.ai/v1',
+  deepinfra: 'https://api.deepinfra.com/v1/openai',
 };
 
 function truncateForJudge(str, max = 4000) {

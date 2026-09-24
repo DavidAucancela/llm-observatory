@@ -19,6 +19,7 @@ const PROVIDER_COST_FNS = {
   gemini:    sdk.calculateGeminiCost,
   grok:      sdk.calculateGrokCost,
   kimi:      sdk.calculateKimiCost,
+  deepinfra: sdk.calculateDeepInfraCost, // undefined on an SDK build older than 1.3.0 — costForProviderUsage guards it
 };
 
 // provider -> SDK pricing table, used for model-recognition and normalization.
@@ -28,6 +29,7 @@ const PROVIDER_PRICING_TABLES = {
   gemini:    sdk.GEMINI_PRICING,
   grok:      sdk.GROK_PRICING,
   kimi:      sdk.KIMI_PRICING,
+  deepinfra: sdk.DEEPINFRA_PRICING, // undefined on an SDK build older than 1.3.0 — isKnownModel guards it
 };
 
 // Anthropic bills cache-WRITE (cache_creation) input at ~1.25x the base input
@@ -38,7 +40,7 @@ const PROVIDER_PRICING_TABLES = {
 // the SDK already documents for Grok/Kimi/Anthropic.
 const CACHE_CREATION_INPUT_MULTIPLIER = 1.25;
 
-const KNOWN_PROVIDERS = new Set(['anthropic', 'openai', 'gemini', 'grok', 'kimi']);
+const KNOWN_PROVIDERS = new Set(['anthropic', 'openai', 'gemini', 'grok', 'kimi', 'deepinfra']);
 
 function canonicalModelId(provider, model) {
   return sdk.normalizeModelId(model, PROVIDER_PRICING_TABLES[provider]);

@@ -28,6 +28,10 @@ const PROVIDER_CAPS = {
   gemini:    { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none' },
   grok:      { adminKey: true,  sync: true,  reconcile: true,  liveBalance: true,  accountId: 'required' },
   kimi:      { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none' },
+  // DeepInfra's only billing endpoint is per-request (POST /v1/request-costs by
+  // request id); there is no org-level usage/cost listing to sync or reconcile
+  // against, so like Kimi it is SDK-metrics only.
+  deepinfra: { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none' },
 };
 
 // Ordered: anthropic and openai first because every "which provider?" dropdown
@@ -40,6 +44,7 @@ const PROVIDER_LABELS = {
   gemini:    'Gemini',
   grok:      'Grok',
   kimi:      'Kimi',
+  deepinfra: 'DeepInfra',
 };
 
 // Where an admin/org-level key comes from. Surfaced verbatim in the 400 that

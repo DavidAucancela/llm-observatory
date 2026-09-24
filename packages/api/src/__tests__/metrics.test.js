@@ -85,6 +85,31 @@ describe('POST /api/metrics', () => {
     expect(res.body.data.provider).toBe('kimi');
   });
 
+  it('accepts provider: deepinfra with an org/Model id', async () => {
+    const { obsToken } = await createOrg('DeepInfra Org');
+    const res = await request(app)
+      .post('/api/metrics')
+      .set('Authorization', `Bearer ${obsToken}`)
+      .send({ ...VALID_METRIC, provider: 'deepinfra', model: 'deepseek-ai/DeepSeek-V4-Pro' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.provider).toBe('deepinfra');
+    expect(res.body.data.model).toBe('deepseek-ai/DeepSeek-V4-Pro');
+  });
+
+  it('stores an unrecognized deepinfra model as-is and keeps the client-reported cost', async () => {
+    // DeepInfra hosts hundreds of models and the SDK table covers a few, so
+    // "unknown model" is the common case — the soft check must warn, never reject
+    // or rewrite the row.
+    const { obsToken } = await createOrg('DeepInfra Unknown Model Org');
+    const res = await request(app)
+      .post('/api/metrics')
+      .set('Authorization', `Bearer ${obsToken}`)
+      .send({ ...VALID_METRIC, provider: 'deepinfra', model: 'some-org/Brand-New-Model', cost_usd: 0.002 });
+    expect(res.status).toBe(201);
+    expect(res.body.data.model).toBe('some-org/Brand-New-Model');
+    expect(parseFloat(res.body.data.cost_usd)).toBe(0.002);
+  });
+
   it('rejects an unsupported provider', async () => {
     const { obsToken } = await createOrg('BadProvider Org');
     const res = await request(app)
@@ -296,7 +321,7 @@ describe('GET /api/metrics/summary — org scoping', () => {
     expect(parseFloat(res.body.summary.total_cost_usd)).toBe(0);
   });
 
-  it('time_series is zero-filled for gemini/grok/kimi too, not just anthropic/openai', async () => {
+  it('time_series is zero-filled for gemini/grok/kimi/deepinfra too, not just anthropic/openai', async () => {
     const { obsToken, jwt } = await createOrg('Gemini TimeSeries Org');
     await request(app)
       .post('/api/metrics')
@@ -313,6 +338,7 @@ describe('GET /api/metrics/summary — org scoping', () => {
     expect(providers.has('openai')).toBe(true);
     expect(providers.has('grok')).toBe(true);
     expect(providers.has('kimi')).toBe(true);
+    expect(providers.has('deepinfra')).toBe(true);
   });
 
   it('model_time_series is zero-filled across buckets and carries all 5 metrics', async () => {

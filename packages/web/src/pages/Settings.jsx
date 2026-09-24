@@ -290,6 +290,7 @@ function AlertsTab() {
   const isAdmin = user?.role === 'admin';
   const [rules, setRules]       = useState([]);
   const [history, setHistory]   = useState([]);
+  const [providers, setProviders] = useState([]);
   const [loading, setLoading]   = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm]         = useState({ provider: 'all', threshold_usd: '', discord_webhook_url: '', debounce_hours: '6' });
@@ -299,11 +300,12 @@ function AlertsTab() {
 
   const fetchData = async () => {
     try {
-      const [r, h] = await Promise.all([
+      const [r, h, p] = await Promise.all([
         apiFetch('/api/alerts/rules').then(r => r.json()),
         apiFetch('/api/alerts/history').then(r => r.json()),
+        apiFetch('/api/providers').then(r => r.json()),
       ]);
-      setRules(r.rules || []); setHistory(h.history || []);
+      setRules(r.rules || []); setHistory(h.history || []); setProviders(p.providers || []);
     } finally { setLoading(false); }
   };
   useEffect(() => { fetchData(); }, []);
@@ -351,11 +353,7 @@ function AlertsTab() {
               <label>{t('settings.alerts.providerLabel')}</label>
               <select className="obs-select" value={form.provider} onChange={e => setForm(f => ({ ...f, provider: e.target.value }))}>
                 <option value="all">{t('settings.alerts.allProviders')}</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="openai">OpenAI</option>
-                <option value="gemini">Gemini</option>
-                <option value="grok">Grok</option>
-                <option value="kimi">Kimi</option>
+                {providers.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
               </select>
             </div>
             <div className="obs-field">

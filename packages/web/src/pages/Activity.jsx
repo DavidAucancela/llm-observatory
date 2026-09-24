@@ -11,7 +11,7 @@ import { RANGE_PRESETS, buildRangeParams } from '../utils/dateRange';
 
 const RANGES = RANGE_PRESETS;
 
-const PROVIDER_LABELS = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', grok: 'Grok', kimi: 'Kimi' };
+const PROVIDER_LABELS = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', grok: 'Grok', kimi: 'Kimi', deepinfra: 'DeepInfra' };
 
 // ── Requests tab ──────────────────────────────────────────────
 function RequestsTab({ range, rangeParams, configuredProviders }) {
