@@ -2,7 +2,7 @@ const express = require('express');
 const { z } = require('zod');
 const pool = require('../db/pool');
 const { deliverWebhooks } = require('../services/webhooks');
-const { getRangeIntervals, appendTimeWindow } = require('../utils/dateRange');
+const { rangeMiddleware, appendTimeWindow, DAY_MS } = require('../utils/dateRange');
 const { isKnownModel, splitRecordedCost } = require('../services/pricingBridge');
 const { PROVIDERS } = require('../constants/providers');
 
@@ -12,6 +12,10 @@ const { PROVIDERS } = require('../constants/providers');
 const PROVIDER_VALUES_SQL = PROVIDERS.map(p => `('${p}')`).join(', ');
 
 const router = express.Router();
+
+// Validates ?range / ?start / ?end once for every GET in this router (400 on bad
+// input) and exposes the parsed window as req.dateRange — see utils/dateRange.js.
+router.use(rangeMiddleware());
 
 // Adds the input/output cost split to every by_model row of GET /summary, so
 // /models can draw a stacked bar per model ("where did this model's money go")
@@ -184,13 +188,9 @@ router.get('/', async (req, res) => {
     const provider = req.query.provider;
     const status   = req.query.status; // 'error' | 'success'
     const search   = req.query.search?.trim();
-    const range   = req.query.range || '7d';
     const sortBy  = ['timestamp','cost_usd','latency_ms','total_tokens'].includes(req.query.sortBy) ? req.query.sortBy : 'timestamp';
     const sortDir = req.query.sortDir === 'asc' ? 'ASC' : 'DESC';
-    const rangeMap= { '24h':'24 hours', '7d':'7 days', '30d':'30 days', '60d':'60 days', '90d':'90 days' };
-    const interval= rangeMap[range] || '7 days';
-    const startDate = req.query.start;
-    const endDate   = req.query.end;
+    const { start: startDate, end: endDate, interval } = req.dateRange;
 
     const tagKey   = req.query.tag_key?.trim();
     const tagValue = req.query.tag_value?.trim();
@@ -254,14 +254,16 @@ router.get('/', async (req, res) => {
 router.get('/summary', async (req, res) => {
   try {
     const { orgId } = req.user;
-    const range    = req.query.range || '7d';
-    const { interval, dblInterval } = getRangeIntervals(range);
-    const startDate = req.query.start;
-    const endDate   = req.query.end;
+    const dr = req.dateRange;
+    const { interval, dblInterval, start: startDate, end: endDate } = dr;
+    const isCustomRange = dr.custom;
     // Daily buckets for ranges ≥ 7d so the chart differentiates days (not just hours);
-    // hourly buckets only for 24h.
-    const useDays   = ['7d','30d','60d','90d'].includes(range) || (startDate && endDate);
-    const timeBucket= useDays ? `DATE_TRUNC('day', timestamp)` : `DATE_TRUNC('hour', timestamp)`;
+    // hourly buckets for 24h and for a custom window of one day or less.
+    const useDays   = isCustomRange ? dr.spanMs > DAY_MS : dr.range !== '24h';
+    // Previous period of a custom window: the same length, ending right where this
+    // one starts — [prevStart, start), exclusive at the top so a row exactly at
+    // `start` is never counted in both periods.
+    const prevStartISO = isCustomRange ? new Date(Date.parse(startDate) - dr.spanMs).toISOString() : null;
 
     // Optional model filter — models to EXCLUDE (comma-separated). Empty → all models.
     const excludeModels = (req.query.exclude_models || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -270,7 +272,7 @@ router.get('/summary', async (req, res) => {
     // picker can always list every model present in the range.
     const baseParams = [orgId];
     let baseWhere;
-    if (startDate && endDate) {
+    if (isCustomRange) {
       baseParams.push(startDate, endDate);
       baseWhere = `org_id = $1 AND timestamp >= $2 AND timestamp <= $3`;
     } else {
@@ -287,12 +289,9 @@ router.get('/summary', async (req, res) => {
 
     const prevParams = [orgId];
     let prevFilter;
-    if (startDate && endDate) {
-      const durationMs = new Date(endDate).getTime() - new Date(startDate).getTime();
-      const prevEnd    = new Date(startDate).toISOString();
-      const prevStart  = new Date(new Date(startDate).getTime() - durationMs).toISOString();
-      prevParams.push(prevStart, prevEnd);
-      prevFilter = `org_id = $1 AND timestamp >= $2 AND timestamp <= $3`;
+    if (isCustomRange) {
+      prevParams.push(prevStartISO, startDate);
+      prevFilter = `org_id = $1 AND timestamp >= $2 AND timestamp < $3`;
     } else {
       prevFilter = `org_id = $1 AND timestamp > NOW() - INTERVAL '${dblInterval}' AND timestamp <= NOW() - INTERVAL '${interval}'`;
     }
@@ -309,14 +308,14 @@ router.get('/summary', async (req, res) => {
     const tsParams = [orgId];
     let tsSeriesStart, tsSeriesEnd;
     let tsJoinFilter = `ac.org_id = $1`;
-    if (startDate && endDate) {
+    if (isCustomRange) {
       tsParams.push(startDate, endDate);
-      tsSeriesStart = `date_trunc('${bucketUnit}', $2::timestamptz)`;
-      tsSeriesEnd   = `date_trunc('${bucketUnit}', $3::timestamptz)`;
+      tsSeriesStart = `date_trunc('${bucketUnit}', $2::timestamptz, 'UTC')`;
+      tsSeriesEnd   = `date_trunc('${bucketUnit}', $3::timestamptz, 'UTC')`;
       tsJoinFilter += ` AND ac.timestamp >= $2 AND ac.timestamp <= $3`;
     } else {
-      tsSeriesStart = `date_trunc('${bucketUnit}', NOW() - INTERVAL '${interval}')`;
-      tsSeriesEnd   = `date_trunc('${bucketUnit}', NOW())`;
+      tsSeriesStart = `date_trunc('${bucketUnit}', NOW() - INTERVAL '${interval}', 'UTC')`;
+      tsSeriesEnd   = `date_trunc('${bucketUnit}', NOW(), 'UTC')`;
       tsJoinFilter += ` AND ac.timestamp > NOW() - INTERVAL '${interval}'`;
     }
     if (excludeModels.length) {
@@ -330,11 +329,19 @@ router.get('/summary', async (req, res) => {
     // timestamp is shifted forward by `interval` so it lands in the same
     // relative bucket as its current-period counterpart. That lets the
     // dashboard overlay a "previous period" line aligned by bucket index,
-    // not by calendar date. Only meaningful for the preset-range path (the
-    // custom start/end path isn't used by the dashboard for this endpoint).
-    const isCustomRange = Boolean(startDate && endDate);
-    const prevTsParams = [orgId];
-    let prevTsJoinFilter = `ac.org_id = $1 AND ac.timestamp > NOW() - INTERVAL '${dblInterval}' AND ac.timestamp <= NOW() - INTERVAL '${interval}'`;
+    // not by calendar date. For a custom window the shift is its own length
+    // (spanMs) and $2/$3 stay the CURRENT window so the bucket grid above
+    // (tsSeriesStart/End) resolves against the right params.
+    let prevTsParams, prevTsJoinFilter, prevTsShift;
+    if (isCustomRange) {
+      prevTsParams     = [orgId, startDate, endDate, prevStartISO, dr.spanMs / 1000];
+      prevTsJoinFilter = `ac.org_id = $1 AND ac.timestamp >= $4 AND ac.timestamp < $2`;
+      prevTsShift      = `make_interval(secs => $5::double precision)`;
+    } else {
+      prevTsParams     = [orgId];
+      prevTsJoinFilter = `ac.org_id = $1 AND ac.timestamp > NOW() - INTERVAL '${dblInterval}' AND ac.timestamp <= NOW() - INTERVAL '${interval}'`;
+      prevTsShift      = `INTERVAL '${interval}'`;
+    }
     if (excludeModels.length) {
       prevTsParams.push(excludeModels);
       prevTsJoinFilter += ` AND ac.model <> ALL($${prevTsParams.length})`;
@@ -393,7 +400,7 @@ router.get('/summary', async (req, res) => {
          FROM generate_series(${tsSeriesStart}, ${tsSeriesEnd}, INTERVAL '1 ${bucketUnit}') AS bs(bucket)
          CROSS JOIN (VALUES ${PROVIDER_VALUES_SQL}) AS p(provider)
          LEFT JOIN api_calls ac
-                ON date_trunc('${bucketUnit}', ac.timestamp) = bs.bucket
+                ON date_trunc('${bucketUnit}', ac.timestamp, 'UTC') = bs.bucket
                AND ac.provider = p.provider
                AND ${tsJoinFilter}
          GROUP BY bs.bucket, p.provider ORDER BY hour ASC`,
@@ -423,7 +430,7 @@ router.get('/summary', async (req, res) => {
          FROM generate_series(${tsSeriesStart}, ${tsSeriesEnd}, INTERVAL '1 ${bucketUnit}') AS bs(bucket)
          CROSS JOIN (SELECT model FROM top_models UNION ALL SELECT 'Other') AS series_model(model)
          LEFT JOIN api_calls ac
-                ON date_trunc('${bucketUnit}', ac.timestamp) = bs.bucket
+                ON date_trunc('${bucketUnit}', ac.timestamp, 'UTC') = bs.bucket
                AND (ac.model = series_model.model
                     OR (series_model.model = 'Other' AND ac.model NOT IN (SELECT model FROM top_models)))
                AND ${tsJoinFilter}
@@ -451,7 +458,7 @@ router.get('/summary', async (req, res) => {
          GROUP BY model ORDER BY requests DESC`,
         baseParams
       ),
-      isCustomRange ? Promise.resolve({ rows: [] }) : pool.query(
+      pool.query(
         `SELECT bs.bucket as hour, p.provider,
                 COALESCE(SUM(ac.total_tokens),0) as total_tokens,
                 COALESCE(SUM(ac.cost_usd),0)     as cost_usd,
@@ -459,7 +466,7 @@ router.get('/summary', async (req, res) => {
          FROM generate_series(${tsSeriesStart}, ${tsSeriesEnd}, INTERVAL '1 ${bucketUnit}') AS bs(bucket)
          CROSS JOIN (VALUES ${PROVIDER_VALUES_SQL}) AS p(provider)
          LEFT JOIN api_calls ac
-                ON date_trunc('${bucketUnit}', ac.timestamp + INTERVAL '${interval}') = bs.bucket
+                ON date_trunc('${bucketUnit}', ac.timestamp + ${prevTsShift}, 'UTC') = bs.bucket
                AND ac.provider = p.provider
                AND ${prevTsJoinFilter}
          GROUP BY bs.bucket, p.provider ORDER BY hour ASC`,
@@ -564,11 +571,7 @@ router.get('/projection', async (req, res) => {
 router.get('/export', async (req, res) => {
   try {
     const { orgId } = req.user;
-    const range    = req.query.range || '30d';
-    const rangeMap = { '24h':'24 hours', '7d':'7 days', '30d':'30 days', '60d':'60 days', '90d':'90 days' };
-    const interval = rangeMap[range] || '30 days';
-    const startDate= req.query.start;
-    const endDate  = req.query.end;
+    const { range, start: startDate, end: endDate, interval } = req.dateRange;
     const provider = req.query.provider;
     const status   = req.query.status;
     const model    = req.query.model;
@@ -610,7 +613,7 @@ router.get('/export', async (req, res) => {
     );
 
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="llm-metrics-${range}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="llm-metrics-${range === 'custom' ? `${startDate.slice(0, 10)}_${endDate.slice(0, 10)}` : range}.csv"`);
     const headers = ['id','timestamp','provider','model','input_tokens','output_tokens','total_tokens','cost_usd','cost_confidence','latency_ms','status_code','cache_read_tokens','cache_write_tokens','error_message','prompt_preview','tags','likely_retry_of'];
     res.write(headers.join(',') + '\n');
     for (const row of result.rows) {
@@ -626,6 +629,7 @@ router.get('/export', async (req, res) => {
     }
     res.end();
   } catch (err) {
+    console.error('GET /api/metrics/export error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -634,9 +638,8 @@ router.get('/export', async (req, res) => {
 router.get('/tag-keys', async (req, res) => {
   try {
     const { orgId } = req.user;
-    const range = req.query.range || '7d';
     const params = [orgId];
-    const timeWindow = appendTimeWindow(params, { range, start: req.query.start, end: req.query.end });
+    const timeWindow = appendTimeWindow(params, req.dateRange);
     const result = await pool.query(
       `SELECT DISTINCT jsonb_object_keys(tags) as key
        FROM api_calls
@@ -658,9 +661,8 @@ router.get('/tag-values', async (req, res) => {
     const { orgId } = req.user;
     const key = req.query.key?.trim();
     if (!key) return res.status(400).json({ error: 'key is required' });
-    const range = req.query.range || '7d';
     const params = [orgId, key];
-    const timeWindow = appendTimeWindow(params, { range, start: req.query.start, end: req.query.end });
+    const timeWindow = appendTimeWindow(params, req.dateRange);
     const result = await pool.query(
       `SELECT DISTINCT tags->>$2 as value
        FROM api_calls
@@ -682,9 +684,8 @@ router.get('/tag-breakdown', async (req, res) => {
     const { orgId } = req.user;
     const key = req.query.key?.trim();
     if (!key) return res.status(400).json({ error: 'key is required' });
-    const range = req.query.range || '7d';
     const params = [orgId, key];
-    const timeWindow = appendTimeWindow(params, { range, start: req.query.start, end: req.query.end });
+    const timeWindow = appendTimeWindow(params, req.dateRange);
     const result = await pool.query(
       `SELECT tags->>$2 as value,
               COUNT(*) as requests,
@@ -707,9 +708,8 @@ router.get('/tag-breakdown', async (req, res) => {
 router.get('/project-breakdown', async (req, res) => {
   try {
     const { orgId } = req.user;
-    const range = req.query.range || '7d';
     const params = [orgId];
-    const timeWindow = appendTimeWindow(params, { range, start: req.query.start, end: req.query.end });
+    const timeWindow = appendTimeWindow(params, req.dateRange);
     const result = await pool.query(
       `SELECT token_name as value,
               COUNT(*) as requests,

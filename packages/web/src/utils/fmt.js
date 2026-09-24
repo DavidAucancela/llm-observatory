@@ -43,7 +43,9 @@ export function fmtCompact(n) {
 export function fmtDateShort(date, lang) {
   if (!date) return '';
   const locale = lang === 'es' ? 'es-ES' : 'en-US';
-  return new Date(`${date}T00:00:00`).toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+  // The date filter is UTC: parse and format the picked YYYY-MM-DD as a UTC day
+  // so the label never shifts by one in a timezone behind/ahead of UTC.
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString(locale, { day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
 
 /** "12 Aug – 20 Aug" — short label for a custom date-range picker. */

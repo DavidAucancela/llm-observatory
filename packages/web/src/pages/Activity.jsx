@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ProviderBadge from '../components/ProviderBadge';
@@ -52,7 +52,11 @@ function RequestsTab({ range, rangeParams, configuredProviders }) {
       .catch(() => {});
   }, [tagKey, rangeKey]);
 
+  // Latest-request-wins so a slow response for an old page/range/filter can't
+  // overwrite the newer one.
+  const fetchSeq = useRef(0);
   const fetchData = useCallback(async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
     try {
       const params = new URLSearchParams({ page, limit: 20, sortBy, sortDir, ...rangeParams });
@@ -63,14 +67,25 @@ function RequestsTab({ range, rangeParams, configuredProviders }) {
       if (tagKey)   params.set('tag_key',  tagKey);
       if (tagValue) params.set('tag_value', tagValue);
       const res = await apiFetch(`/api/metrics?${params}`);
-      setData(await res.json());
+      const json = await res.json();
+      if (seq !== fetchSeq.current) return;
+      setData(json);
     } catch (err) { console.error(err); }
-    finally { setLoading(false); }
+    finally { if (seq === fetchSeq.current) setLoading(false); }
   }, [page, rangeKey, provider, status, model, search, sortBy, sortDir, tagKey, tagValue]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  useEffect(() => { setPage(1); }, [rangeKey]);
+  // A range change must land on page 1. Resetting the page in a separate effect
+  // fired a wasted request for the old page first, then a second one; instead,
+  // when the range changed while off page 1, only reset the page here and let
+  // the resulting fetchData change do the single fetch.
+  const prevRangeKey = useRef(rangeKey);
+  useEffect(() => {
+    if (prevRangeKey.current !== rangeKey) {
+      prevRangeKey.current = rangeKey;
+      if (page !== 1) { setPage(1); return; }
+    }
+    fetchData();
+  }, [fetchData]);
 
   useEffect(() => {
     const timer = setTimeout(() => { setSearch(searchInput); setPage(1); }, 350);
@@ -95,7 +110,7 @@ function RequestsTab({ range, rangeParams, configuredProviders }) {
       const res = await apiFetch(`/api/metrics/export?${params}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `metrics-${range}.csv`; a.click();
+      const a = document.createElement('a'); a.href = url; a.download = `metrics-${range === 'custom' ? `${rangeParams.start.slice(0, 10)}_${rangeParams.end.slice(0, 10)}` : range}.csv`; a.click();
       URL.revokeObjectURL(url);
     } catch {}
   };

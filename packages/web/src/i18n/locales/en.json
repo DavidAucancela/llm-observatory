@@ -37,7 +37,12 @@
     "rangeCustom": "Custom",
     "rangeFrom": "From",
     "rangeTo": "To",
-    "rangeApply": "Apply"
+    "rangeApply": "Apply",
+    "rangeErrInvalid": "Enter valid dates",
+    "rangeErrOrder": "Start must be on or before end",
+    "rangeErrFuture": "Dates can't be in the future",
+    "rangeErrTooLong": "Range too long (max 366 days)",
+    "rangeUtcHint": "Days are UTC"
   },
   "common": {
     "save": "Save",

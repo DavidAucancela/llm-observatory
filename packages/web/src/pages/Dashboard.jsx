@@ -9,7 +9,7 @@ import { useSocket } from '../hooks/useSocket';
 import { useApi } from '../hooks/useApi';
 import { useRangeFilter } from '../hooks/useRangeFilter';
 import { formatCost, fmtLatency, fmtDateShort } from '../utils/fmt';
-import { RANGE_PRESETS, buildRangeParams } from '../utils/dateRange';
+import { RANGE_PRESETS, buildRangeParams, todayUtc } from '../utils/dateRange';
 import { buildGrid } from '../utils/metricGrid';
 import { PROVIDER_COLORS } from '../utils/providerColors';
 import { shortModelName } from '../utils/modelAlias';
@@ -256,24 +256,32 @@ function TagBreakdown({ rangeParams, className = '' }) {
   const { t } = useTranslation();
   const rangeKey = new URLSearchParams(rangeParams).toString();
 
+  // `cancelled` guards drop a response that lands after the range changed again
+  // (rapid range switches otherwise let an older request overwrite the newer one).
   useEffect(() => {
+    let cancelled = false;
     apiFetch(`/api/metrics/tag-keys?${rangeKey}`)
       .then(r => r.json())
       .then(d => {
+        if (cancelled) return;
         const keys = d.keys || [];
         setTagKeys(keys);
-        if (keys.length && !tagKey) setTagKey(keys[0]);
+        // Keep the selected key only if it still exists in the new range.
+        setTagKey(prev => (keys.includes(prev) ? prev : (keys[0] || '')));
       })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [rangeKey]);
 
   useEffect(() => {
-    if (!tagKey) return;
+    if (!tagKey) { setData([]); return; }
+    let cancelled = false;
     setLoading(true);
     apiFetch(`/api/metrics/tag-breakdown?key=${encodeURIComponent(tagKey)}&${rangeKey}`)
       .then(r => r.json())
-      .then(d => { setData(d.data || []); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then(d => { if (!cancelled) { setData(d.data || []); setLoading(false); } })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [tagKey, rangeKey]);
 
   if (!tagKeys.length) return null;
@@ -433,8 +441,13 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   const rangeParams = useMemo(() => buildRangeParams(range, customRange), [range, customRange]);
   const rangeQuery  = useMemo(() => new URLSearchParams(rangeParams).toString(), [rangeParams]);
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
+  // Latest-request-wins: a slow response for an old range must not overwrite the
+  // one the user is looking at now. `silent` (live socket refreshes) skips the
+  // loading flag so the skeletons don't flash on every incoming metric.
+  const fetchSeq = useRef(0);
+  const fetchAll = useCallback(async (silent = false) => {
+    const seq = ++fetchSeq.current;
+    if (!silent) setLoading(true);
     try {
       const [sumRes, credRes, reconRes] = await Promise.all([
         apiFetch(`/api/metrics/summary?${rangeQuery}`),
@@ -442,22 +455,29 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
         apiFetch(`/api/reconciliation/latest`),
       ]);
       const sum = await sumRes.json();
-      setSummary(sum);
       const creds = (await credRes.json());
+      const recon = (await reconRes.json()).latest || [];
+      if (seq !== fetchSeq.current) return; // superseded by a newer fetch
+      setSummary(sum);
       const credList = creds.credentials || creds.data || [];
       setHasCredentials(credList.length > 0);
       setConfiguredProviders([...new Set(credList.map(c => c.provider))]);
-      setReconciliation((await reconRes.json()).latest || []);
+      setReconciliation(recon);
     } catch (err) { console.error(err); }
-    finally { setLoading(false); }
+    finally { if (seq === fetchSeq.current) setLoading(false); }
   }, [rangeQuery]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  // A live metric is "now": only refresh when the selected window can contain it.
+  // A historical custom range (end before today, UTC) can't change.
+  const rangeIncludesNow = range !== 'custom' || (customRange?.end || '') >= todayUtc();
   useEffect(() => {
-    on('new-metric', fetchAll);
-    return () => off('new-metric', fetchAll);
-  }, [on, off, fetchAll]);
+    if (!rangeIncludesNow) return undefined;
+    const onNewMetric = () => fetchAll(true);
+    on('new-metric', onNewMetric);
+    return () => off('new-metric', onNewMetric);
+  }, [on, off, fetchAll, rangeIncludesNow]);
 
   const s    = summary?.summary;
   const prev = summary?.prev_summary;
