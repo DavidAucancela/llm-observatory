@@ -39,7 +39,7 @@ MonitoredAnthropic(
 - Both: 1 retry after 1s on failure, 5s timeout per attempt
 
 **Metric payload:** same shape as Node.js SDK, including:
-- `cache_read_tokens` / `cache_write_tokens` — from `usage.cache_read_input_tokens` / `usage.cache_creation_input_tokens` for Anthropic, or `usage_metadata.cached_content_token_count` for Gemini (`cache_write_tokens` always 0 — Gemini has no separate cache-write count). `openai.py` (and `grok.py`/`kimi.py`, which mirror it) don't populate these fields at all here yet.
+- `cache_read_tokens` / `cache_write_tokens` — from `usage.cache_read_input_tokens` / `usage.cache_creation_input_tokens` for Anthropic, or `usage_metadata.cached_content_token_count` for Gemini (`cache_write_tokens` always 0 — Gemini has no separate cache-write count). For the OpenAI-compatible wrappers (`openai.py`, `grok.py`, `kimi.py`, `deepinfra.py`) `cache_read_tokens` comes from `usage.prompt_tokens_details.cached_tokens` (Kimi: flat `usage.cached_tokens`) via `_cached_tokens_nested`/`_cached_tokens_flat` in `openai.py`, mirroring Node's `extractCachedTokens*`; `cache_write_tokens` is always 0 (no such field).
 - `error_type` — classified by `classify_error()`: `auth_error`, `rate_limit`, `invalid_request`, `network_error`, `timeout`, `server_error`, `unknown_error`. Gemini's `google.genai.errors.APIError` exposes `.code` (int) instead of `.status_code` — `classify_error()` checks `.status_code`, then `.code`, then `.status` in that order to support all providers.
 - `error_message` — raw exception message, truncated to 500 chars
 

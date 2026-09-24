@@ -17,7 +17,7 @@ from ._utils import (
     send_metric_background,
     send_metric_background_async,
 )
-from .openai import _accumulate_stream_delta, _finalize_stream_response
+from .openai import _accumulate_stream_delta, _finalize_stream_response, _cached_tokens_nested
 
 # DeepInfra exposes an OpenAI-compatible chat.completions API — same
 # request/response shape, streamed the same way — so this module reuses the
@@ -85,6 +85,7 @@ class _DeepInfraCompletionsProxy:
         usage = getattr(response, "usage", None) if response else None
         input_t  = getattr(usage, "prompt_tokens",     0) if usage else 0
         output_t = getattr(usage, "completion_tokens", 0) if usage else 0
+        cache_t  = _cached_tokens_nested(usage) if usage else 0
         response_details = extract_openai_response_details(response) if response else {
             "response_full": None, "tool_calls": [], "stop_reason": None,
         }
@@ -95,6 +96,8 @@ class _DeepInfraCompletionsProxy:
             "input_tokens":   input_t,
             "output_tokens":  output_t,
             "total_tokens":   input_t + output_t,
+            "cache_read_tokens":  cache_t,
+            "cache_write_tokens": 0,
             "cost_usd":       _resolve_cost(usage, params["model"], input_t, output_t),
             "latency_ms":     int((time.perf_counter() - start) * 1000),
             "status_code":    status_code,
@@ -154,7 +157,7 @@ class _DeepInfraCompletionsProxy:
         tools: list[str],
         request_details: dict[str, Any],
     ) -> Iterator[Any]:
-        input_t = output_t = 0
+        input_t = output_t = cache_t = 0
         last_usage: Any = None
         text_parts: list[str] = []
         tool_calls_map: dict[int, dict[str, str]] = {}
@@ -166,6 +169,7 @@ class _DeepInfraCompletionsProxy:
                     last_usage = usage
                     input_t  = getattr(usage, "prompt_tokens",     input_t)
                     output_t = getattr(usage, "completion_tokens", output_t)
+                    cache_t  = _cached_tokens_nested(usage)
                 finish_reason = _accumulate_stream_delta(chunk, text_parts, tool_calls_map)
                 stop_reason = finish_reason or stop_reason
                 yield chunk
@@ -177,6 +181,8 @@ class _DeepInfraCompletionsProxy:
                 "input_tokens":   input_t,
                 "output_tokens":  output_t,
                 "total_tokens":   input_t + output_t,
+                "cache_read_tokens":  cache_t,
+                "cache_write_tokens": 0,
                 "cost_usd":       _resolve_cost(last_usage, params["model"], input_t, output_t),
                 "latency_ms":     int((time.perf_counter() - start) * 1000),
                 "status_code":    200,
@@ -267,6 +273,7 @@ class _AsyncDeepInfraCompletionsProxy:
         usage = getattr(response, "usage", None) if response else None
         input_t  = getattr(usage, "prompt_tokens",     0) if usage else 0
         output_t = getattr(usage, "completion_tokens", 0) if usage else 0
+        cache_t  = _cached_tokens_nested(usage) if usage else 0
         response_details = extract_openai_response_details(response) if response else {
             "response_full": None, "tool_calls": [], "stop_reason": None,
         }
@@ -277,6 +284,8 @@ class _AsyncDeepInfraCompletionsProxy:
             "input_tokens":   input_t,
             "output_tokens":  output_t,
             "total_tokens":   input_t + output_t,
+            "cache_read_tokens":  cache_t,
+            "cache_write_tokens": 0,
             "cost_usd":       _resolve_cost(usage, params["model"], input_t, output_t),
             "latency_ms":     int((time.perf_counter() - start) * 1000),
             "status_code":    status_code,
@@ -336,7 +345,7 @@ class _AsyncDeepInfraCompletionsProxy:
         tools: list[str],
         request_details: dict[str, Any],
     ) -> AsyncIterator[Any]:
-        input_t = output_t = 0
+        input_t = output_t = cache_t = 0
         last_usage: Any = None
         text_parts: list[str] = []
         tool_calls_map: dict[int, dict[str, str]] = {}
@@ -348,6 +357,7 @@ class _AsyncDeepInfraCompletionsProxy:
                     last_usage = usage
                     input_t  = getattr(usage, "prompt_tokens",     input_t)
                     output_t = getattr(usage, "completion_tokens", output_t)
+                    cache_t  = _cached_tokens_nested(usage)
                 finish_reason = _accumulate_stream_delta(chunk, text_parts, tool_calls_map)
                 stop_reason = finish_reason or stop_reason
                 yield chunk
@@ -359,6 +369,8 @@ class _AsyncDeepInfraCompletionsProxy:
                 "input_tokens":   input_t,
                 "output_tokens":  output_t,
                 "total_tokens":   input_t + output_t,
+                "cache_read_tokens":  cache_t,
+                "cache_write_tokens": 0,
                 "cost_usd":       _resolve_cost(last_usage, params["model"], input_t, output_t),
                 "latency_ms":     int((time.perf_counter() - start) * 1000),
                 "status_code":    200,

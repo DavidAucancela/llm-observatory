@@ -16,7 +16,7 @@ from ._utils import (
     send_metric_background,
     send_metric_background_async,
 )
-from .openai import _accumulate_stream_delta, _finalize_stream_response
+from .openai import _accumulate_stream_delta, _finalize_stream_response, _cached_tokens_flat
 
 # Kimi (Moonshot AI) exposes an OpenAI-compatible chat.completions API — same
 # request/response shape, streamed the same way — so this module reuses the
@@ -63,6 +63,7 @@ class _KimiCompletionsProxy:
         usage = getattr(response, "usage", None) if response else None
         input_t  = getattr(usage, "prompt_tokens",     0) if usage else 0
         output_t = getattr(usage, "completion_tokens", 0) if usage else 0
+        cache_t  = _cached_tokens_flat(usage) if usage else 0
         response_details = extract_openai_response_details(response) if response else {
             "response_full": None, "tool_calls": [], "stop_reason": None,
         }
@@ -73,6 +74,8 @@ class _KimiCompletionsProxy:
             "input_tokens":   input_t,
             "output_tokens":  output_t,
             "total_tokens":   input_t + output_t,
+            "cache_read_tokens":  cache_t,
+            "cache_write_tokens": 0,
             "cost_usd":       calculate_kimi_cost(params["model"], input_t, output_t),
             "latency_ms":     int((time.perf_counter() - start) * 1000),
             "status_code":    status_code,
@@ -132,7 +135,7 @@ class _KimiCompletionsProxy:
         tools: list[str],
         request_details: dict[str, Any],
     ) -> Iterator[Any]:
-        input_t = output_t = 0
+        input_t = output_t = cache_t = 0
         text_parts: list[str] = []
         tool_calls_map: dict[int, dict[str, str]] = {}
         stop_reason = None
@@ -142,6 +145,7 @@ class _KimiCompletionsProxy:
                 if usage:
                     input_t  = getattr(usage, "prompt_tokens",     input_t)
                     output_t = getattr(usage, "completion_tokens", output_t)
+                    cache_t  = _cached_tokens_flat(usage)
                 finish_reason = _accumulate_stream_delta(chunk, text_parts, tool_calls_map)
                 stop_reason = finish_reason or stop_reason
                 yield chunk
@@ -153,6 +157,8 @@ class _KimiCompletionsProxy:
                 "input_tokens":   input_t,
                 "output_tokens":  output_t,
                 "total_tokens":   input_t + output_t,
+                "cache_read_tokens":  cache_t,
+                "cache_write_tokens": 0,
                 "cost_usd":       calculate_kimi_cost(params["model"], input_t, output_t),
                 "latency_ms":     int((time.perf_counter() - start) * 1000),
                 "status_code":    200,
@@ -239,6 +245,7 @@ class _AsyncKimiCompletionsProxy:
         usage = getattr(response, "usage", None) if response else None
         input_t  = getattr(usage, "prompt_tokens",     0) if usage else 0
         output_t = getattr(usage, "completion_tokens", 0) if usage else 0
+        cache_t  = _cached_tokens_flat(usage) if usage else 0
         response_details = extract_openai_response_details(response) if response else {
             "response_full": None, "tool_calls": [], "stop_reason": None,
         }
@@ -249,6 +256,8 @@ class _AsyncKimiCompletionsProxy:
             "input_tokens":   input_t,
             "output_tokens":  output_t,
             "total_tokens":   input_t + output_t,
+            "cache_read_tokens":  cache_t,
+            "cache_write_tokens": 0,
             "cost_usd":       calculate_kimi_cost(params["model"], input_t, output_t),
             "latency_ms":     int((time.perf_counter() - start) * 1000),
             "status_code":    status_code,
@@ -308,7 +317,7 @@ class _AsyncKimiCompletionsProxy:
         tools: list[str],
         request_details: dict[str, Any],
     ) -> AsyncIterator[Any]:
-        input_t = output_t = 0
+        input_t = output_t = cache_t = 0
         text_parts: list[str] = []
         tool_calls_map: dict[int, dict[str, str]] = {}
         stop_reason = None
@@ -318,6 +327,7 @@ class _AsyncKimiCompletionsProxy:
                 if usage:
                     input_t  = getattr(usage, "prompt_tokens",     input_t)
                     output_t = getattr(usage, "completion_tokens", output_t)
+                    cache_t  = _cached_tokens_flat(usage)
                 finish_reason = _accumulate_stream_delta(chunk, text_parts, tool_calls_map)
                 stop_reason = finish_reason or stop_reason
                 yield chunk
@@ -329,6 +339,8 @@ class _AsyncKimiCompletionsProxy:
                 "input_tokens":   input_t,
                 "output_tokens":  output_t,
                 "total_tokens":   input_t + output_t,
+                "cache_read_tokens":  cache_t,
+                "cache_write_tokens": 0,
                 "cost_usd":       calculate_kimi_cost(params["model"], input_t, output_t),
                 "latency_ms":     int((time.perf_counter() - start) * 1000),
                 "status_code":    200,
