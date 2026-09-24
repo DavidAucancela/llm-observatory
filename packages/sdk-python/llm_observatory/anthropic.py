@@ -241,7 +241,7 @@ class _AsyncMessagesProxy:
         }
 
         if params.get("stream"):
-            return self._create_stream(params, start, prompt_preview, tools, request_details)
+            return await self._create_stream(params, start, prompt_preview, tools, request_details)
 
         response = None
         status_code = 200
