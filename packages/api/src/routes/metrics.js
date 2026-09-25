@@ -5,6 +5,7 @@ const { deliverWebhooks } = require('../services/webhooks');
 const { rangeMiddleware, appendTimeWindow, DAY_MS } = require('../utils/dateRange');
 const { isKnownModel, splitRecordedCost } = require('../services/pricingBridge');
 const { PROVIDERS } = require('../constants/providers');
+const { computeCoverage } = require('../services/coverage');
 
 // Zero-fill grid for the per-provider time series. Built from the shared list
 // so the two queries below can never drift apart from each other (they were
@@ -729,6 +730,20 @@ router.get('/project-breakdown', async (req, res) => {
 });
 
 // ── GET /:id — single record ──────────────────────────────────────────────────
+// ── GET /coverage — is the selected window fully covered by data? ────────────
+// Accepts the same ?range / ?start / ?end as every other range endpoint (already
+// validated by the router-level rangeMiddleware) and reports, for that window,
+// whether the numbers may be incomplete and whether a provider sync could fill
+// it. Read-only: it never triggers a sync. Must be registered before /:id.
+router.get('/coverage', async (req, res) => {
+  try {
+    res.json(await computeCoverage(req.user.orgId, req.dateRange));
+  } catch (err) {
+    console.error('GET /api/metrics/coverage error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const { orgId } = req.user;

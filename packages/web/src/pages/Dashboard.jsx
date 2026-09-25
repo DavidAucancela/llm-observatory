@@ -5,6 +5,7 @@ import Sparkline from '../components/Sparkline';
 import HBar from '../components/HBar';
 import ChartToolbar, { ChartHintBanner } from '../components/ChartToolbar';
 import TopBar from '../components/TopBar';
+import CoverageBanner from '../components/CoverageBanner';
 import { useSocket } from '../hooks/useSocket';
 import { useApi } from '../hooks/useApi';
 import { useRangeFilter } from '../hooks/useRangeFilter';
@@ -655,6 +656,8 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
         darkMode={darkMode}
         onToggleDarkMode={onToggleDarkMode}
       />
+
+      <CoverageBanner rangeParams={rangeParams} />
 
       <div className="obs-content dash-content">
         {/* Chart spans the full content width; the toolbar is a vertical rail on

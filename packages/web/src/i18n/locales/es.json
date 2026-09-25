@@ -492,7 +492,19 @@
       "inProgress": "En progreso…",
       "completed": "Completado",
       "lastSync": "Última sincronización",
-      "neverSynced": "Nunca sincronizado"
+      "neverSynced": "Nunca sincronizado",
+      "rangeLabel": "Rango de fechas",
+      "modeDays": "Últimos N días",
+      "modeRange": "Rango de fechas",
+      "from": "Desde",
+      "to": "Hasta",
+      "retentionNote": "Los datos de más de {{days}} días se eliminan cada noche, así que no se pueden sincronizar días anteriores.",
+      "clamped": "El inicio se movió a una fecha posterior: los datos más antiguos se eliminan cada noche.",
+      "lastSuccess": "Último sync exitoso",
+      "covers": "cubre",
+      "lastAttempt": "Último intento",
+      "invalidRange": "Elige un rango válido (inicio igual o anterior al fin, sin fechas futuras).",
+      "emptyFetch": "Sin datos"
     },
     "alerts": {
       "newRule": "+ Nueva regla",
@@ -628,5 +640,13 @@
     "mockOverview": "Resumen",
     "mockLive": "En vivo",
     "mockByProvider": "Por proveedor"
+  },
+  "coverage": {
+    "title": "Este rango puede estar incompleto",
+    "beforeFirst": "Los registros empiezan el {{date}}.",
+    "beyondRetention": "Los datos de más de {{days}} días se eliminan cada noche.",
+    "syncGap": "{{provider}}: el último sync cubre {{from}} – {{to}}.",
+    "syncRange": "Sincronizar este rango",
+    "askAdmin": "Pide a un admin que sincronice este rango."
   }
 }

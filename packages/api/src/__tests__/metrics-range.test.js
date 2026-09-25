@@ -144,3 +144,51 @@ describe('GET /api/balances — range scoping', () => {
     expect(a.pct_used).toBeCloseTo(50);
   });
 });
+
+describe('GET /api/metrics/coverage', () => {
+  it('flags a window before the first record and suggests a sync when an admin key exists', async () => {
+    const { orgId, jwt } = await createOrg('Coverage Org');
+    const { encrypt } = require('../db/crypto');
+    await pool.query(
+      `INSERT INTO provider_credentials (org_id, provider, key_type, api_key_encrypted, key_hint, label)
+       VALUES ($1, 'anthropic', 'admin', $2, 'sk-ad…test', 'admin')`,
+      [orgId, encrypt('sk-ant-admin-test')]
+    );
+    await insertCall(orgId, new Date(Date.now() - 2 * 86400000).toISOString());
+    const older = new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10);
+    const olderEnd = new Date(Date.now() - 15 * 86400000).toISOString().slice(0, 10);
+
+    const res = await get(jwt, `/api/metrics/coverage?start=${older}&end=${olderEnd}`);
+    expect(res.status).toBe(200);
+    expect(res.body.has_data).toBe(true);
+    expect(res.body.before_first_data).toBe(true);
+    expect(res.body.needs_attention).toBe(true);
+    expect(res.body.can_sync).toBe(true);
+    expect(res.body.syncable_providers).toContain('anthropic');
+    expect(res.body.suggested_sync).toEqual({ start: older, end: olderEnd });
+  });
+
+  it('a preset covering the data needs no attention, and ping rows do not count as data', async () => {
+    const { orgId, jwt } = await createOrg('Clean Coverage Org');
+    await insertCall(orgId, new Date(Date.now() - 86400000).toISOString());
+    await pool.query(
+      `INSERT INTO api_calls (org_id, timestamp, provider, model, input_tokens, output_tokens, total_tokens, cost_usd, latency_ms, status_code, prompt_preview, api_key_hint)
+       VALUES ($1, NOW() - INTERVAL '40 days', 'anthropic', 'm', 1, 1, 2, 0, 1, 200, 'test:sdk_integration', 'k')`,
+      [orgId]
+    );
+    const res = await get(jwt, '/api/metrics/coverage?range=7d');
+    expect(res.status).toBe(200);
+    expect(res.body.needs_attention).toBe(false);
+    // the 40-day-old ping row must not make "first data" 40 days ago
+    expect(new Date(res.body.first_data_at).getTime()).toBeGreaterThan(Date.now() - 3 * 86400000);
+  });
+
+  it('validates the window like every range endpoint, and is org-scoped', async () => {
+    const a = await createOrg('Cov Org A');
+    const b = await createOrg('Cov Org B');
+    await insertCall(a.orgId, new Date(Date.now() - 86400000).toISOString());
+    expect((await get(a.jwt, '/api/metrics/coverage?start=2026-07-01')).status).toBe(400);
+    const res = await get(b.jwt, '/api/metrics/coverage?range=7d');
+    expect(res.body.has_data).toBe(false); // org B sees none of org A's rows
+  });
+});

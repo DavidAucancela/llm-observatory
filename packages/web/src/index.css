@@ -2487,3 +2487,22 @@ body {
   /* Search input full width on mobile */
   .obs-search-wrap { flex: 1 1 100%; }
 }
+
+/* Coverage notice under the top bar: the picked date range may show incomplete
+   numbers (see components/CoverageBanner.jsx). Warning-tinted, never blocking. */
+.obs-coverage {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 12px 28px 0;
+  padding: 9px 14px;
+  font-size: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  border-radius: 6px;
+}
+.obs-coverage-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+.obs-coverage-text strong { font-weight: 600; }
+.obs-coverage-text span { color: var(--muted); }
+.obs-coverage-note { color: var(--muted); font-size: 11px; }
+@media (max-width: 720px) { .obs-coverage { margin: 10px 16px 0; } }
