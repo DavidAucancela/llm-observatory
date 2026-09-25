@@ -116,6 +116,26 @@ describe('GET /api/metrics/summary — custom range buckets and previous period'
   });
 });
 
+describe('default range when `range` is omitted (unchanged from before the shared parser)', () => {
+  it('/export defaults to 30d, everything else to 7d', async () => {
+    const { orgId, jwt } = await createOrg('Defaults Org');
+    await insertCall(orgId, new Date(Date.now() - 2 * 86400000).toISOString());
+    await insertCall(orgId, new Date(Date.now() - 20 * 86400000).toISOString());
+    const exp = await get(jwt, '/api/metrics/export');
+    expect(exp.text.trim().split('\n')).toHaveLength(3);            // header + both rows
+    const list = await get(jwt, '/api/metrics');
+    expect(list.body.pagination.total).toBe(1);                       // only the 2-day-old row
+  });
+
+  it('/api/balances defaults to 30d spend', async () => {
+    const { orgId, jwt } = await createOrg('Balance Default Org');
+    await pool.query(`INSERT INTO provider_balances (org_id, provider, amount_usd) VALUES ($1, 'anthropic', 100)`, [orgId]);
+    await insertCall(orgId, new Date(Date.now() - 20 * 86400000).toISOString(), { cost: 7 });
+    const res = await get(jwt, '/api/balances');
+    expect(res.body.providers.find(p => p.provider === 'anthropic').total_spent).toBeCloseTo(7);
+  });
+});
+
 describe('GET /api/metrics/export — custom range', () => {
   it('names the file after the dates and honours the bounds', async () => {
     const { orgId, jwt } = await createOrg('Export Org');

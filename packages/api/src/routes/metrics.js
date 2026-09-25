@@ -16,7 +16,12 @@ const router = express.Router();
 
 // Validates ?range / ?start / ?end once for every GET in this router (400 on bad
 // input) and exposes the parsed window as req.dateRange — see utils/dateRange.js.
-router.use(rangeMiddleware());
+// Defaults match what each endpoint had before the shared parser: 7d, except
+// /export which has always defaulted to 30d (a curl/SDK caller omitting `range`
+// must not silently get a quarter of the rows).
+const defaultRangeMw = rangeMiddleware();
+const exportRangeMw  = rangeMiddleware({ defaultRange: '30d' });
+router.use((req, res, next) => (req.path === '/export' ? exportRangeMw : defaultRangeMw)(req, res, next));
 
 // Adds the input/output cost split to every by_model row of GET /summary, so
 // /models can draw a stacked bar per model ("where did this model's money go")
