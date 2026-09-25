@@ -6,6 +6,7 @@ import TopBar from '../components/TopBar';
 import CoverageBanner from '../components/CoverageBanner';
 import { useApi } from '../hooks/useApi';
 import { useRangeFilter } from '../hooks/useRangeFilter';
+import { useProviders } from '../hooks/useProviders';
 import { RANGE_PRESETS, buildRangeParams, rangeLabel } from '../utils/dateRange';
 import { fmtDateTime, formatCost } from '../utils/fmt';
 
@@ -83,17 +84,54 @@ function FinanceOverview({ rangeParams, rangeLabel, tab, onTabChange, configured
   );
 }
 
+// The provider's own reported balance (GET /api/balances/:provider/live — only
+// providers with the `liveBalance` capability, today Grok). Shown next to the
+// tracked figure, never merged into it: the tracked balance is our recharge
+// ledger minus measured spend, this is what the provider says it has.
+function LiveBalance({ provider }) {
+  const { apiFetch } = useApi();
+  const { t } = useTranslation();
+  const [state, setState] = useState({ status: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch(`/api/balances/${provider}/live`)
+      .then(async r => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) }))
+      .then(({ ok, status, body }) => {
+        if (cancelled) return;
+        if (ok) setState({ status: 'ok', balance: body.balance_usd });
+        else if (status === 409) setState({ status: 'setup' });
+        else setState({ status: 'error' });
+      })
+      .catch(() => { if (!cancelled) setState({ status: 'error' }); });
+    return () => { cancelled = true; };
+  }, [provider]);
+
+  if (state.status === 'loading') return null;
+  const text = state.status === 'ok'
+    ? t('finance.providerBalance', { value: formatCost(state.balance) })
+    : state.status === 'setup' ? t('finance.liveNeedsAdminKey') : t('finance.liveUnavailable');
+  return <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>{text}</div>;
+}
+
 // ── Balances tab ──────────────────────────────────────────────
 function BalancesTab({ rangeParams, configuredProviders, onChanged }) {
   const [data, setData]         = useState(null);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm]         = useState({ provider: 'anthropic', amount_usd: '', note: '' });
+  const [form, setForm]         = useState({ provider: '', amount_usd: '', note: '' });
   const [submitting, setSubmitting] = useState(false);
   const { apiFetch } = useApi();
   const { t } = useTranslation();
+  const { ids: allProviderIds, labelFor, hasCap } = useProviders();
   const rangeQuery = new URLSearchParams(rangeParams).toString();
+
+  // Every provider can take a manual recharge (the API accepts them all): those
+  // with an admin key/billing API just also get synced spend. Offer the org's
+  // configured providers, or all of them if none is configured yet.
+  const providerOptions = configuredProviders.length ? configuredProviders : allProviderIds;
+  const formProvider = providerOptions.includes(form.provider) ? form.provider : providerOptions[0];
 
   // Latest-request-wins: fetchData is also called after add/delete, and a slow
   // response for a previous range must not overwrite the current one.
@@ -116,12 +154,6 @@ function BalancesTab({ rangeParams, configuredProviders, onChanged }) {
 
   useEffect(() => { fetchData(); }, [rangeQuery]);
 
-  useEffect(() => {
-    if (configuredProviders.length && !configuredProviders.includes(form.provider)) {
-      setForm(f => ({ ...f, provider: configuredProviders[0] }));
-    }
-  }, [configuredProviders]);
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
@@ -129,9 +161,9 @@ function BalancesTab({ rangeParams, configuredProviders, onChanged }) {
       await apiFetch(`/api/balances`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, amount_usd: parseFloat(form.amount_usd) }),
+        body: JSON.stringify({ ...form, provider: formProvider, amount_usd: parseFloat(form.amount_usd) }),
       });
-      setForm({ provider: 'anthropic', amount_usd: '', note: '' });
+      setForm({ provider: '', amount_usd: '', note: '' });
       setShowForm(false);
       fetchData();
       onChanged?.();
@@ -189,6 +221,7 @@ function BalancesTab({ rangeParams, configuredProviders, onChanged }) {
               <div style={{ fontSize: 20, fontWeight: 600, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em', color: 'var(--text)' }}>
                 {formatCost(p.remaining)}
               </div>
+              {hasCap(p.provider, 'liveBalance') && <LiveBalance provider={p.provider} />}
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)' }}>
               {t('finance.consumed')}{' '}
@@ -219,9 +252,9 @@ function BalancesTab({ rangeParams, configuredProviders, onChanged }) {
           <form onSubmit={handleSubmit} className="obs-form-row" style={{ flexWrap: 'wrap' }}>
             <div className="obs-field">
               <label>{t('finance.providerLabel')}</label>
-              <select className="obs-select" value={form.provider} onChange={e => setForm(f => ({ ...f, provider: e.target.value }))}>
-                {(configuredProviders.length ? configuredProviders : ['anthropic', 'openai']).map(p => (
-                  <option key={p} value={p}>{p === 'anthropic' ? 'Anthropic' : p === 'openai' ? 'OpenAI' : p}</option>
+              <select className="obs-select" value={formProvider} onChange={e => setForm(f => ({ ...f, provider: e.target.value }))}>
+                {providerOptions.map(p => (
+                  <option key={p} value={p}>{labelFor(p)}</option>
                 ))}
               </select>
             </div>
@@ -428,10 +461,6 @@ export default function Finance({ darkMode, onToggleDarkMode }) {
   const [tab, setTab] = useState(searchParams.get('tab') === 'budgets' ? 'budgets' : 'balances');
   const { range, setRange, customRange, setCustomRange } = useRangeFilter('7d');
   const [configuredProviders, setConfiguredProviders] = useState([]);
-  // Balance tracking (GET/POST /api/balances) only supports anthropic/openai —
-  // no admin-key concept exists for gemini/grok/kimi — so the "add balance"
-  // dropdown must never offer them even if the org has a credential for them.
-  const balanceProviders = configuredProviders.filter(p => ['anthropic', 'openai'].includes(p));
   const [refreshTick, setRefreshTick] = useState(0);
   const bumpRefresh = () => setRefreshTick(n => n + 1);
   const { apiFetch } = useApi();
@@ -488,7 +517,7 @@ export default function Finance({ darkMode, onToggleDarkMode }) {
           </button>
         </div>
 
-        {tab === 'balances' && <BalancesTab rangeParams={rangeParams} configuredProviders={balanceProviders} onChanged={bumpRefresh} />}
+        {tab === 'balances' && <BalancesTab rangeParams={rangeParams} configuredProviders={configuredProviders} onChanged={bumpRefresh} />}
         {tab === 'budgets'  && <BudgetsTab onChanged={bumpRefresh} />}
       </div>
     </main>

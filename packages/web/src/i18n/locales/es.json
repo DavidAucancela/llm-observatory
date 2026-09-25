@@ -437,12 +437,15 @@
     "limitLabel": "Límite (USD)",
     "limitDisplay": "Límite",
     "spentDisplay": "Gastado",
-    "balancesIntro": "Los saldos registran el crédito que cargas a cada proveedor (Anthropic, OpenAI). Registra cada recarga con «+ Registrar recarga» (proveedor + monto en USD); el sistema descuenta automáticamente el gasto real de tus llamadas API en el rango seleccionado para mostrar el saldo restante.",
+    "balancesIntro": "Los saldos registran el crédito que cargas a cada proveedor. Registra cada recarga con «+ Registrar recarga» (proveedor + monto en USD). El saldo restante es todo lo que has cargado menos todo el gasto registrado de ese proveedor; «consumido» sigue el rango de fechas elegido. Los proveedores que informan su propio saldo también lo muestran.",
     "budgetsIntro": "Los presupuestos son límites de gasto que tú defines (diario, semanal o mensual). Crea uno con «+ Nuevo presupuesto» indicando nombre, período y límite en USD; la barra de progreso compara el gasto del período actual contra ese límite y se pone ámbar al superar el 75% y roja al llegar al 100%.",
     "kpiRemaining": "Saldo restante",
     "kpiSpent": "Gasto ({{range}})",
     "kpiBudgets": "Presupuestos activos",
-    "kpiAtRisk": "Presupuestos en riesgo"
+    "kpiAtRisk": "Presupuestos en riesgo",
+    "providerBalance": "Saldo según el proveedor: {{value}}",
+    "liveNeedsAdminKey": "Agrega la admin key para ver el saldo del proveedor",
+    "liveUnavailable": "Saldo del proveedor no disponible"
   },
   "settings": {
     "title": "Ajustes",
