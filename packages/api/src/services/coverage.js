@@ -25,7 +25,12 @@ function assessCoverage({ windowStartMs, windowEndMs, now, retention, firstDataM
   const hasData = firstDataMs != null;
 
   const beforeFirstData = hasData && windowStartMs < floorUtcDay(firstDataMs);
-  const beyondRetention = windowStartMs < cutoff;
+  // Compare against the raw retention edge, not the day-aligned `cutoff`: a
+  // rolling preset that spans exactly the retention (e.g. 90d with 90-day
+  // retention) starts at now-R, which is always a few hours before the next UTC
+  // midnight, and would be flagged on every load though nothing in it was purged.
+  // (`cutoff` still bounds what a sync can usefully import, below.)
+  const beyondRetention = windowStartMs < now - retention * DAY_MS;
 
   const syncable = providers.filter(p => p.syncable && p.hasAdminKey);
 

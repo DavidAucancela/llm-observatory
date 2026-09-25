@@ -57,6 +57,17 @@ describe('assessCoverage', () => {
     expect(c.suggested_sync.start).toBe(new Date(cutoff).toISOString().slice(0, 10));
   });
 
+  it('a rolling preset spanning exactly the retention is NOT flagged (only the day-aligned sync cutoff is later)', () => {
+    const c = run({ retention: 30, windowStartMs: NOW - 30 * DAY_MS, firstDataMs: NOW - 40 * DAY_MS });
+    expect(c.beyond_retention).toBe(false);
+    expect(c.needs_attention).toBe(false);
+  });
+
+  it('a window starting even a little before now - retention IS flagged', () => {
+    const c = run({ retention: 30, windowStartMs: NOW - 30 * DAY_MS - 60 * 1000, firstDataMs: NOW - 40 * DAY_MS });
+    expect(c.beyond_retention).toBe(true);
+  });
+
   it('a window entirely older than retention is flagged but not syncable', () => {
     const c = run({ windowStartMs: D('2026-01-01'), windowEndMs: D('2026-02-01'), firstDataMs: D('2026-09-10') });
     expect(c.beyond_retention).toBe(true);

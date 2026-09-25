@@ -32,7 +32,7 @@ const BalanceSchema = z.object({
 
 // 'all' isn't exposed by the range picker (no UI sends it) but is kept as a
 // valid value for any future/direct caller wanting unfiltered spend.
-router.get('/', rangeMiddleware({ allowAll: true }), async (req, res) => {
+router.get('/', rangeMiddleware({ allowAll: true, defaultRange: '30d' }), async (req, res) => {
   try {
     const { orgId } = req.user;
     const spendingParams = [orgId];
