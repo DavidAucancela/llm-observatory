@@ -492,7 +492,19 @@
       "inProgress": "In progress…",
       "completed": "Completed",
       "lastSync": "Last sync",
-      "neverSynced": "Never synced"
+      "neverSynced": "Never synced",
+      "rangeLabel": "Date range",
+      "modeDays": "Last N days",
+      "modeRange": "Date range",
+      "from": "From",
+      "to": "To",
+      "retentionNote": "Data older than {{days}} days is deleted nightly, so older days can't be synced.",
+      "clamped": "Start moved to a later date: older data is deleted nightly.",
+      "lastSuccess": "Last successful sync",
+      "covers": "covers",
+      "lastAttempt": "Last attempt",
+      "invalidRange": "Pick a valid range (start on or before end, not in the future).",
+      "emptyFetch": "Nothing returned"
     },
     "alerts": {
       "newRule": "+ New rule",
@@ -628,5 +640,13 @@
     "mockOverview": "Overview",
     "mockLive": "Live",
     "mockByProvider": "By provider"
+  },
+  "coverage": {
+    "title": "This range may be incomplete",
+    "beforeFirst": "Records start on {{date}}.",
+    "beyondRetention": "Data older than {{days}} days is deleted nightly.",
+    "syncGap": "{{provider}}: last sync covers {{from}} – {{to}}.",
+    "syncRange": "Sync this range",
+    "askAdmin": "Ask an admin to sync this range."
   }
 }

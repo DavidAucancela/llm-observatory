@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import ProviderBadge from '../components/ProviderBadge';
 import RequestDrawer from '../components/RequestDrawer';
 import TopBar from '../components/TopBar';
+import CoverageBanner from '../components/CoverageBanner';
 import { fmtDateTime, formatCost, fmtLatency } from '../utils/fmt';
 import { useApi } from '../hooks/useApi';
 import { useRangeFilter } from '../hooks/useRangeFilter';
@@ -318,6 +319,8 @@ export default function Activity({ darkMode, onToggleDarkMode }) {
         darkMode={darkMode}
         onToggleDarkMode={onToggleDarkMode}
       />
+
+      <CoverageBanner rangeParams={rangeParams} />
 
       <div className="obs-content" style={{ paddingTop: 0 }}>
         <RequestsTab range={range} rangeParams={rangeParams} configuredProviders={configuredProviders} />

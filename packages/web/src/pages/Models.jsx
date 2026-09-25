@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import ProviderBadge from '../components/ProviderBadge';
 import ModelCostBreakdown from '../components/ModelCostBreakdown';
 import TopBar from '../components/TopBar';
+import CoverageBanner from '../components/CoverageBanner';
 import { formatCost, fmtLatency, fmtCompact } from '../utils/fmt';
 import { useApi } from '../hooks/useApi';
 import { useRangeFilter } from '../hooks/useRangeFilter';
@@ -160,6 +161,8 @@ export default function Models({ darkMode, onToggleDarkMode }) {
         darkMode={darkMode}
         onToggleDarkMode={onToggleDarkMode}
       />
+
+      <CoverageBanner rangeParams={rangeParams} />
 
       <div className="obs-content" style={{ paddingTop: 0 }}>
         {loading ? (

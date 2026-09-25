@@ -18,6 +18,7 @@ const http = require('http');
 const cron = require('node-cron');
 const { Server } = require('socket.io');
 const pool = require('./db/pool');
+const { retentionDays } = require('./utils/retention');
 const logger = require('./logger');
 const { authMiddleware } = require('./middleware/auth');
 
@@ -217,7 +218,7 @@ async function startServer() {
 
   // Cron: data retention — delete records older than DATA_RETENTION_DAYS (default 90) at 02:00 daily
   cron.schedule('0 2 * * *', async () => {
-    const days = Math.max(1, parseInt(process.env.DATA_RETENTION_DAYS || '90', 10));
+    const days = retentionDays();
     try {
       const result = await pool.query(
         `DELETE FROM api_calls WHERE timestamp < NOW() - ($1 || ' days')::interval`,

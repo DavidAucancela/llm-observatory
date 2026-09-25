@@ -6,6 +6,8 @@ const { anthropicCacheCreationTokens } = require('../services/providerUsage');
 const { costForProviderUsage } = require('../services/pricingBridge');
 const { SYNC_PROVIDERS, syncableProviders } = require('../services/providerRegistry');
 const { requiresAccountId, ADMIN_KEY_HELP, PROVIDER_LABELS } = require('../constants/providers');
+const { resolveSyncWindow } = require('../services/syncWindow');
+const { RangeParamError } = require('../utils/dateRange');
 
 const router = express.Router();
 
@@ -190,73 +192,97 @@ async function importBuckets(buckets, provider, orgId, windowStartISO, windowEnd
   return imported;
 }
 
-// POST /api/sync/:provider — start historical sync using org's admin key
+// POST /api/sync/:provider — start historical sync using org's admin key.
+// Window: `start`+`end` (query or body; bare YYYY-MM-DD = UTC day) OR `days`
+// (look-back, default 30). Aligned to UTC midnight, capped at now, and trimmed to
+// the retention window — see services/syncWindow.js.
 router.post('/:provider', requireAdmin, async (req, res, next) => {
   const { provider } = req.params;
   const { orgId }    = req.user;
-  const days         = parseInt(req.query.days) || 30;
 
-  const syncEntry = SYNC_PROVIDERS[provider];
-  if (!syncEntry) {
-    return res.status(400).json({ error: `Proveedor no soportado. Usa: ${syncableProviders().join(', ')}` });
-  }
-
-  const credRow = await pool.query(
-    `SELECT api_key_encrypted, provider_account_id FROM provider_credentials
-     WHERE org_id = $1 AND provider = $2 AND key_type = 'admin'
-     ORDER BY created_at DESC LIMIT 1`,
-    [orgId, provider]
-  );
-
-  if (!credRow.rows.length) {
-    return res.status(400).json({
-      error: `Admin key not configured for this provider. Add it in Settings.`,
-      detail: ADMIN_KEY_HELP[provider] || `Configura una admin key de ${PROVIDER_LABELS[provider] || provider}`,
-    });
-  }
-
-  const { api_key_encrypted, provider_account_id } = credRow.rows[0];
-  if (requiresAccountId(provider) && !provider_account_id) {
-    return res.status(400).json({
-      error: 'Falta el Team ID en la credencial admin.',
-      detail: `Edita la credencial en Ajustes y agrega el Team ID. ${ADMIN_KEY_HELP[provider] || ''}`,
-    });
-  }
-  const cred = { apiKey: decrypt(api_key_encrypted), accountId: provider_account_id };
-
-  const logRow = await pool.query(
-    `INSERT INTO sync_logs (org_id, provider, status) VALUES ($1, $2, 'running') RETURNING id`,
-    [orgId, provider]
-  );
-  const syncId = logRow.rows[0].id;
-
-  res.json({ success: true, sync_id: syncId, message: 'Sync iniciado en background' });
-
-  ;(async () => {
-    try {
-      const endDate   = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
-
-      const { buckets, startISO, endISO } = await syncEntry.fetchBuckets(cred, startDate, endDate);
-      const imported = await importBuckets(buckets, provider, orgId, startISO, endISO, { clampDayTotal: syncEntry.clampDayTotal });
-
-      await pool.query(
-        `UPDATE sync_logs
-         SET status = 'success', completed_at = NOW(), records_synced = $1,
-             date_range_start = $2, date_range_end = $3
-         WHERE id = $4`,
-        [imported, startISO, endISO, syncId]
-      );
-      console.log(`[sync] ${provider} complete: ${imported} records imported`);
-    } catch (err) {
-      await pool.query(
-        `UPDATE sync_logs SET status = 'error', completed_at = NOW(), error_message = $1 WHERE id = $2`,
-        [err.message, syncId]
-      );
-      console.error('[sync] Error:', err.message);
+  try {
+    const syncEntry = SYNC_PROVIDERS[provider];
+    if (!syncEntry) {
+      return res.status(400).json({ error: `Proveedor no soportado. Usa: ${syncableProviders().join(', ')}` });
     }
-  })();
+
+    let window;
+    try {
+      window = resolveSyncWindow({ ...req.query, ...(req.body || {}) });
+    } catch (err) {
+      if (err instanceof RangeParamError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+    const { startDate, endDate } = window;
+
+    const credRow = await pool.query(
+      `SELECT api_key_encrypted, provider_account_id FROM provider_credentials
+       WHERE org_id = $1 AND provider = $2 AND key_type = 'admin'
+       ORDER BY created_at DESC LIMIT 1`,
+      [orgId, provider]
+    );
+
+    if (!credRow.rows.length) {
+      return res.status(400).json({
+        error: `Admin key not configured for this provider. Add it in Settings.`,
+        detail: ADMIN_KEY_HELP[provider] || `Configura una admin key de ${PROVIDER_LABELS[provider] || provider}`,
+      });
+    }
+
+    const { api_key_encrypted, provider_account_id } = credRow.rows[0];
+    if (requiresAccountId(provider) && !provider_account_id) {
+      return res.status(400).json({
+        error: 'Falta el Team ID en la credencial admin.',
+        detail: `Edita la credencial en Ajustes y agrega el Team ID. ${ADMIN_KEY_HELP[provider] || ''}`,
+      });
+    }
+    const cred = { apiKey: decrypt(api_key_encrypted), accountId: provider_account_id };
+
+    // The requested window is recorded up front so the UI can show what a
+    // still-running (or failed) sync was asked to cover; success overwrites it
+    // with the window the provider fetcher actually used.
+    const logRow = await pool.query(
+      `INSERT INTO sync_logs (org_id, provider, status, date_range_start, date_range_end)
+       VALUES ($1, $2, 'running', $3, $4) RETURNING id`,
+      [orgId, provider, startDate.toISOString(), endDate.toISOString()]
+    );
+    const syncId = logRow.rows[0].id;
+
+    res.json({
+      success: true, sync_id: syncId, message: 'Sync iniciado en background',
+      window: { start: startDate.toISOString(), end: endDate.toISOString() },
+      clamped: window.clamped, warning: window.warning,
+    });
+
+    ;(async () => {
+      try {
+        const { buckets, startISO, endISO } = await syncEntry.fetchBuckets(cred, startDate, endDate);
+        const imported = await importBuckets(buckets, provider, orgId, startISO, endISO, { clampDayTotal: syncEntry.clampDayTotal });
+
+        // An empty bucket list is a degraded/empty fetch (importBuckets leaves
+        // existing rows alone): still a completed run, but say so instead of
+        // logging a bare success that looks the same as "nothing to import".
+        const note = (!Array.isArray(buckets) || buckets.length === 0)
+          ? 'El proveedor no devolvió datos para este rango; no se importó nada y los datos existentes no se tocaron'
+          : null;
+
+        await pool.query(
+          `UPDATE sync_logs
+           SET status = 'success', completed_at = NOW(), records_synced = $1,
+               date_range_start = $2, date_range_end = $3, error_message = $5
+           WHERE id = $4`,
+          [imported, startISO, endISO, syncId, note]
+        );
+        console.log(`[sync] ${provider} complete: ${imported} records imported`);
+      } catch (err) {
+        await pool.query(
+          `UPDATE sync_logs SET status = 'error', completed_at = NOW(), error_message = $1 WHERE id = $2`,
+          [err.message, syncId]
+        ).catch(() => {});
+        console.error('[sync] Error:', err.message);
+      }
+    })();
+  } catch (err) { next(err); }
 });
 
 // DELETE /api/sync/:provider/data — delete all api_calls for provider in this org

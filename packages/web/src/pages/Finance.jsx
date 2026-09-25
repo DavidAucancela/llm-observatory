@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ProviderBadge from '../components/ProviderBadge';
 import TopBar from '../components/TopBar';
+import CoverageBanner from '../components/CoverageBanner';
 import { useApi } from '../hooks/useApi';
 import { useRangeFilter } from '../hooks/useRangeFilter';
 import { RANGE_PRESETS, buildRangeParams, rangeLabel } from '../utils/dateRange';
@@ -465,6 +466,8 @@ export default function Finance({ darkMode, onToggleDarkMode }) {
         darkMode={darkMode}
         onToggleDarkMode={onToggleDarkMode}
       />
+
+      <CoverageBanner rangeParams={rangeParams} />
 
       <div className="obs-content" style={{ paddingTop: 0 }}>
         <FinanceOverview
