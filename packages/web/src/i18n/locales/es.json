@@ -468,6 +468,8 @@
       "sdkType": "SDK",
       "adminType": "Admin",
       "apiKeyField": "Clave API",
+      "accountIdField": "Team / Account ID",
+      "accountIdPlaceholder": "Copiado de la consola del proveedor",
       "untested": "Sin probar",
       "valid": "Válida",
       "invalid": "Inválida",
