@@ -347,6 +347,22 @@ export default function ChartToolbar({
                     </span>
                   )}
                 </button>
+
+                {/* Placeholder for an actual forecast line (distinct from
+                    "vs. previous period", which overlays real historical data)
+                    — disabled and badged until that's built, so it doesn't
+                    read as a working toggle that silently does nothing. */}
+                <button
+                  type="button"
+                  className="dash-chart-rail-legend-compare dash-chart-rail-legend-compare--disabled"
+                  title={t('dashboard.projectionComingSoon')}
+                  disabled
+                  tabIndex={-1}
+                >
+                  <span className="dash-chart-rail-legend-compare-check" />
+                  <span className="dash-chart-rail-legend-name">{t('dashboard.projectionToggle')}</span>
+                  <span className="dash-chart-rail-legend-soon-badge">{t('dashboard.comingSoon')}</span>
+                </button>
               </>
             )}
           </div>

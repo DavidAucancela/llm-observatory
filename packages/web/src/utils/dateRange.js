@@ -34,16 +34,30 @@ export function todayUtc() {
 }
 
 /**
- * Why a custom start/end pair can't be applied, as a `topbar.*` i18n key, or
- * null when it's fine. `today` is injectable for tests.
+ * Earliest day (YYYY-MM-DD, UTC) still inside the retention window — the day
+ * after this one is the oldest the API hasn't purged yet. `retentionDays` is
+ * the org-wide `DATA_RETENTION_DAYS` (default 90, see useRetention()).
  */
-export function customRangeError(start, end, today = todayUtc()) {
+export function earliestAvailableDay(today = todayUtc(), retentionDays = 90) {
+  const ms = Date.parse(`${today}T00:00:00Z`) - (retentionDays - 1) * DAY_MS;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Why a custom start/end pair can't be applied, as a `topbar.*` i18n key, or
+ * null when it's fine. `today` is injectable for tests. `retentionDays` is
+ * optional — omit it (e.g. validating a value read back from localStorage,
+ * before useRetention() has resolved) to skip the retention check rather than
+ * reject a range that might turn out to be fine.
+ */
+export function customRangeError(start, end, today = todayUtc(), retentionDays) {
   if (!start || !end) return null; // incomplete: Apply stays disabled, nothing to explain yet
   if (!isValidDateOnly(start) || !isValidDateOnly(end)) return 'topbar.rangeErrInvalid';
   if (start > end) return 'topbar.rangeErrOrder';
   if (end > today || start > today) return 'topbar.rangeErrFuture';
   const spanDays = (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / DAY_MS + 1;
   if (spanDays > MAX_CUSTOM_SPAN_DAYS) return 'topbar.rangeErrTooLong';
+  if (retentionDays != null && start < earliestAvailableDay(today, retentionDays)) return 'topbar.rangeErrRetention';
   return null;
 }
 

@@ -42,7 +42,8 @@
     "rangeErrOrder": "El inicio debe ser anterior o igual al fin",
     "rangeErrFuture": "Las fechas no pueden ser futuras",
     "rangeErrTooLong": "Rango demasiado largo (máx. 366 días)",
-    "rangeUtcHint": "Los días son UTC"
+    "rangeErrRetention": "Esa fecha de inicio es anterior a la ventana de retención de datos ({{days}} días)",
+    "rangeRetentionHint": "Datos disponibles desde {{date}}"
   },
   "common": {
     "save": "Guardar",
@@ -261,10 +262,11 @@
     "requestsOverTime": "Solicitudes en el tiempo",
     "costOverTime": "Costo en el tiempo",
     "latencyOverTime": "Latencia promedio en el tiempo",
-    "errorRateOverTime": "Tasa de error en el tiempo",
-    "errorRate": "Tasa de error",
     "comparePrevToggle": "vs. periodo anterior",
     "prevPeriodLabel": "Periodo anterior",
+    "projectionToggle": "Proyección",
+    "projectionComingSoon": "Pronóstico del periodo actual — próximamente",
+    "comingSoon": "PRÓXIMAMENTE",
     "insights": {
       "severityCritical": "Crítico",
       "severityWarning": "Atención",

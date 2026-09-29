@@ -4,8 +4,9 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthProvider';
 import NotificationBell from './NotificationBell';
 import { useSidebar } from '../contexts/SidebarContext';
-import { fmtRangeShort } from '../utils/fmt';
-import { RANGE_LABEL_I18N_KEYS, todayUtc, customRangeError } from '../utils/dateRange';
+import { fmtRangeShort, fmtDateShort } from '../utils/fmt';
+import { RANGE_LABEL_I18N_KEYS, todayUtc, customRangeError, earliestAvailableDay } from '../utils/dateRange';
+import { useRetention } from '../hooks/useRetention';
 
 function IconHamburger() {
   return (
@@ -163,6 +164,11 @@ export default function TopBar({
   // would go stale in a tab left open past midnight).
   const [today, setToday] = useState(todayUtc);
   const wrapRef = useRef(null);
+  // Data retention window (default 90d) — bounds how far back the picker lets
+  // you go, instead of accepting any date up to MAX_CUSTOM_SPAN_DAYS (366) and
+  // only telling you afterward, via CoverageBanner, that most of it is empty.
+  const retentionDays = useRetention();
+  const minDay = earliestAvailableDay(today, retentionDays);
 
   useEffect(() => {
     if (!customOpen) return;
@@ -181,7 +187,7 @@ export default function TopBar({
   };
 
   // Typed input can bypass the inputs' min/max, so validate the values themselves.
-  const draftError = customRangeError(draftStart, draftEnd, today);
+  const draftError = customRangeError(draftStart, draftEnd, today, retentionDays);
   const canApply = Boolean(draftStart && draftEnd) && !draftError;
   const customLabel = range === 'custom' && customRange?.start && customRange?.end
     ? fmtRangeShort(customRange.start, customRange.end, i18n.language)
@@ -226,7 +232,7 @@ export default function TopBar({
                   <label htmlFor="range-from">{t('topbar.rangeFrom')}</label>
                   <input
                     id="range-from" type="date" className="obs-input"
-                    value={draftStart} max={draftEnd || today}
+                    value={draftStart} min={minDay} max={draftEnd || today}
                     onChange={e => setDraftStart(e.target.value)}
                   />
                 </div>
@@ -234,12 +240,14 @@ export default function TopBar({
                   <label htmlFor="range-to">{t('topbar.rangeTo')}</label>
                   <input
                     id="range-to" type="date" className="obs-input"
-                    value={draftEnd} min={draftStart || undefined} max={today}
+                    value={draftEnd} min={draftStart || minDay} max={today}
                     onChange={e => setDraftEnd(e.target.value)}
                   />
                 </div>
                 <div style={{ fontSize: 11, color: draftError ? 'var(--danger, #e5484d)' : 'var(--text-muted, inherit)', opacity: draftError ? 1 : 0.7 }} role={draftError ? 'alert' : undefined}>
-                  {draftError ? t(draftError) : t('topbar.rangeUtcHint')}
+                  {draftError
+                    ? t(draftError, { days: retentionDays })
+                    : t('topbar.rangeRetentionHint', { date: fmtDateShort(minDay, i18n.language) })}
                 </div>
                 <button
                   type="button"

@@ -688,7 +688,10 @@ body {
 }
 
 .dash-kpi {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* 4 cards (Requests/Tokens/Cost/Latency — Error rate was dropped, its info
+     already lives in the "Errors by type" card below) fit one clean row on
+     desktop, so there's no leftover single-card row to reflow at any width. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 0;
   flex-shrink: 0;
 }
@@ -876,6 +879,31 @@ body {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--page);
+}
+
+/* "Projection" placeholder row — same shape as the working compare toggle
+   above it, but visibly inert: no hover feedback, dimmed, and badged so it
+   doesn't read as a control that's just silently broken. */
+.dash-chart-rail-legend-compare--disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.dash-chart-rail-legend-compare--disabled:hover {
+  background: transparent;
+  color: var(--muted);
+  border-color: transparent;
+}
+.dash-chart-rail-legend-soon-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: var(--hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 5px;
 }
 
 .dash-chart-rail-views { align-self: stretch; }
@@ -1299,6 +1327,31 @@ body {
   font-variant-numeric: tabular-nums;
   margin-left: 6px;
 }
+/* Every model in the tooltip was filtered out (none had real requests this
+   bucket — a genuinely quiet day inside an otherwise active range). */
+.chart2d-tooltip-empty {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* 2D trend chart reveal: the "invocation" effect is each Line's own draw-in
+   animation (isAnimationActive in ModelTrendChart2D.jsx — every line now
+   shares the same duration/easing/type, model lines and the previous-period
+   overlay alike). This is the second, distinct "settle" effect fired once
+   that finishes: a soft glow pulse per line group, then back to nothing —
+   a visual "the chart just finished loading" cue instead of the lines
+   simply stopping mid-frame. */
+.chart2d-draw-complete .recharts-line {
+  animation: chart2d-line-settle 550ms ease-out;
+}
+@keyframes chart2d-line-settle {
+  0%   { filter: drop-shadow(0 0 0 transparent); }
+  35%  { filter: drop-shadow(0 0 7px color-mix(in srgb, var(--accent) 60%, transparent)); }
+  100% { filter: drop-shadow(0 0 0 transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chart2d-draw-complete .recharts-line { animation: none; }
+}
 
 .kpi-card-clickable {
   cursor: pointer;
@@ -1347,10 +1400,12 @@ body {
   overflow-x: hidden;
 }
 
-/* Between tablet and desktop the 5-up KPI row and the 178px rail both get too
-   cramped, well before the mobile breakpoint takes over. */
+/* Between tablet and desktop the 4-up KPI row and the 178px rail both get too
+   cramped, well before the mobile breakpoint takes over. 2 columns (not 3)
+   so 4 cards always fill full rows instead of leaving a lone card dangling
+   in a half-empty last row. */
 @media (max-width: 1240px) {
-  .dash-kpi { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dash-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dash-chart-rail { width: 148px; padding-right: 14px; }
 }
 
@@ -2478,8 +2533,30 @@ body {
     padding-right: 16px;
   }
 
-  /* Hide range picker text on very small screens */
-  .obs-range-btn { padding: 5px 7px; }
+  /* Hide range picker text on very small screens; bigger tap target than the
+     desktop 5px vertical padding gives (~22px tall — under the ~44px touch
+     guideline), without widening the button horizontally where space is
+     already tight next to the hamburger/bell/account icons. */
+  .obs-range-btn { padding: 5px 7px; min-height: 32px; }
+
+  /* Custom date-range popover: on desktop it's anchored to the "Custom"
+     button (.obs-range-wrap, position:relative) via left:0, which is safe
+     there because the range picker sits near the header's left edge. On
+     mobile the header is a single nowrap row (hamburger + range picker +
+     bell/account, see above) with no reliable left offset, so a
+     wrap-relative popover can run past the right edge depending on how wide
+     the active preset's label is. Anchoring to the viewport instead — fixed,
+     full width minus the page's own 16px gutters — keeps it on-screen
+     regardless of where the button ends up, and gives the two date inputs
+     more breathing room than the 240px desktop width would on a phone. */
+  .obs-range-custom-panel {
+    position: fixed;
+    top: 60px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-width: none;
+  }
 
   /* Form rows wrap on mobile */
   .obs-form-row { flex-wrap: wrap; }
