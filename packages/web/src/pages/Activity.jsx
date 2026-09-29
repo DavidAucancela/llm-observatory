@@ -8,14 +8,15 @@ import CoverageBanner from '../components/CoverageBanner';
 import { fmtDateTime, formatCost, fmtLatency } from '../utils/fmt';
 import { useApi } from '../hooks/useApi';
 import { useRangeFilter } from '../hooks/useRangeFilter';
+import { useProviders } from '../hooks/useProviders';
 import { RANGE_PRESETS, buildRangeParams } from '../utils/dateRange';
 
 const RANGES = RANGE_PRESETS;
 
-const PROVIDER_LABELS = { anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Gemini', grok: 'Grok', kimi: 'Kimi', deepinfra: 'DeepInfra' };
 
 // ── Requests tab ──────────────────────────────────────────────
 function RequestsTab({ range, rangeParams, configuredProviders }) {
+  const { ids: allProviderIds, labelFor } = useProviders();
   // Deep-link support: insight cards on the Dashboard link here with
   // ?model=<model>&status=error to jump straight to the offending rows.
   const [searchParams] = useSearchParams();
@@ -155,8 +156,8 @@ function RequestsTab({ range, rangeParams, configuredProviders }) {
           onChange={e => { setProvider(e.target.value); setPage(1); }}
         >
           <option value="">{t('activity.allProviders')}</option>
-          {(configuredProviders.length ? configuredProviders : ['anthropic', 'openai']).map(p => (
-            <option key={p} value={p}>{PROVIDER_LABELS[p] ?? p}</option>
+          {(configuredProviders.length ? configuredProviders : allProviderIds).map(p => (
+            <option key={p} value={p}>{labelFor(p)}</option>
           ))}
         </select>
 

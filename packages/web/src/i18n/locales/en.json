@@ -437,12 +437,15 @@
     "limitLabel": "Limit (USD)",
     "limitDisplay": "Limit",
     "spentDisplay": "Spent",
-    "balancesIntro": "Balances track the credit you load onto each provider (Anthropic, OpenAI). Register each top-up with \"+ Register recharge\" (provider + amount in USD); the system automatically subtracts the real spend from your API calls in the selected range to show the remaining balance.",
+    "balancesIntro": "Balances track the credit you load onto each provider. Register each top-up with \"+ Register recharge\" (provider + amount in USD). The remaining balance is everything you've loaded minus all the spend recorded for that provider; \"consumed\" follows the selected date range. Providers that report their own balance also show it.",
     "budgetsIntro": "Budgets are spending limits you define yourself (daily, weekly or monthly). Create one with \"+ New budget\" by giving it a name, a period and a limit in USD; the progress bar compares the current period's spend against that limit and turns amber above 75% and red at 100%.",
     "kpiRemaining": "Remaining balance",
     "kpiSpent": "Spend ({{range}})",
     "kpiBudgets": "Active budgets",
-    "kpiAtRisk": "Budgets at risk"
+    "kpiAtRisk": "Budgets at risk",
+    "providerBalance": "Provider balance: {{value}}",
+    "liveNeedsAdminKey": "Add the admin key to see the provider's balance",
+    "liveUnavailable": "Provider balance unavailable"
   },
   "settings": {
     "title": "Settings",
