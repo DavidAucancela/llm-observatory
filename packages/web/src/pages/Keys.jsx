@@ -4,10 +4,11 @@ import ProviderBadge from '../components/ProviderBadge';
 import TopBar from '../components/TopBar';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../auth/AuthProvider';
+import { useProviders } from '../hooks/useProviders';
 import { fmtDateTime, fmtDate } from '../utils/fmt';
 
 // ── Keys ──────────────────────────────────────────────────
-function KeyRow({ cred, onDeleted, onTested, isAdmin }) {
+function KeyRow({ cred, onDeleted, onTested, onUpdated, isAdmin }) {
   const { apiFetch } = useApi();
   const { t } = useTranslation();
   const [testing,  setTesting]  = useState(false);
@@ -15,6 +16,24 @@ function KeyRow({ cred, onDeleted, onTested, isAdmin }) {
   const [syncing,  setSyncing]  = useState(false);
   const [syncOk,   setSyncOk]   = useState(null);
   const [testErr,  setTestErr]  = useState(null);
+  const [editing,  setEditing]  = useState(false);
+  const [editVals, setEditVals] = useState({ label: cred.label, provider_account_id: cred.provider_account_id || '' });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editErr, setEditErr]   = useState(null);
+
+  const handleEditSave = async () => {
+    setSavingEdit(true); setEditErr(null);
+    try {
+      const res = await apiFetch(`/api/credentials/${cred.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ label: editVals.label, provider_account_id: editVals.provider_account_id || undefined }),
+      });
+      const d = await res.json();
+      if (!res.ok) { setEditErr(Array.isArray(d.error) ? d.error.map(e => e.message).join(', ') : (d.error || 'Error')); return; }
+      onUpdated(cred.id, d.data);
+      setEditing(false);
+    } catch { setEditErr('Connection error'); } finally { setSavingEdit(false); }
+  };
 
   const handleTest = async () => {
     setTesting(true); setTestErr(null);
@@ -53,6 +72,31 @@ function KeyRow({ cred, onDeleted, onTested, isAdmin }) {
   const isValid = cred.is_valid;
   const tested  = !!cred.last_tested_at;
 
+  if (editing) {
+    return (
+      <div className="obs-row-grid" style={{
+        display: 'grid', gridTemplateColumns: '1fr 1fr auto auto',
+        gap: 10, alignItems: 'flex-end',
+        padding: '11px 0', borderBottom: '1px solid var(--border-soft)'
+      }}>
+        <div className="obs-field">
+          <label>{t('settings.keys.labelField')}</label>
+          <input className="obs-input" value={editVals.label} onChange={e => setEditVals(v => ({ ...v, label: e.target.value }))} />
+        </div>
+        <div className="obs-field">
+          <label>{t('settings.keys.accountIdField')}</label>
+          <input className="obs-input" placeholder={t('settings.keys.accountIdPlaceholder')}
+            value={editVals.provider_account_id} onChange={e => setEditVals(v => ({ ...v, provider_account_id: e.target.value }))} />
+        </div>
+        <button className="obs-btn obs-btn-sm" onClick={() => setEditing(false)}>{t('common.cancel')}</button>
+        <button className="obs-btn obs-btn-primary obs-btn-sm" disabled={savingEdit} onClick={handleEditSave}>
+          {savingEdit ? '…' : t('common.save')}
+        </button>
+        {editErr && <div style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--error)' }}>{editErr}</div>}
+      </div>
+    );
+  }
+
   return (
     <div className="obs-row-grid" style={{
       display: 'grid',
@@ -63,6 +107,9 @@ function KeyRow({ cred, onDeleted, onTested, isAdmin }) {
     }}>
       <div>
         <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{cred.label}</div>
+        {cred.provider_account_id && (
+          <div style={{ fontSize: 10.5, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>{cred.provider_account_id}</div>
+        )}
         {testErr && <span style={{ fontSize: 11, color: 'var(--error)' }}>{testErr}</span>}
       </div>
       <ProviderBadge provider={cred.provider} />
@@ -80,6 +127,11 @@ function KeyRow({ cred, onDeleted, onTested, isAdmin }) {
         <button className="obs-btn obs-btn-sm" disabled={testing} onClick={handleTest}>
           {testing ? '…' : t('settings.keys.testButton')}
         </button>
+        {isAdmin && cred.key_type === 'admin' && (
+          <button className="obs-btn obs-btn-sm" onClick={() => setEditing(true)}>
+            {t('common.edit')}
+          </button>
+        )}
         {isAdmin && (
           <button className="obs-btn obs-btn-ghost obs-btn-sm" disabled={deleting} onClick={handleDelete}
             style={{ color: 'var(--muted)' }}>
@@ -91,17 +143,31 @@ function KeyRow({ cred, onDeleted, onTested, isAdmin }) {
   );
 }
 
-// Providers with no admin/org-level key concept — sync happens only via the SDK's
-// real-time metric POSTs, never a historical org usage export (see credentials.js/
-// sync.js). Locking key_type to 'sdk' here matches the server: nothing stops an
-// 'admin' row for these being created via a raw API call, but there's no UI/test
-// path or sync route that would ever use one.
-const SDK_ONLY_PROVIDERS = ['gemini', 'grok', 'kimi', 'deepinfra'];
+// Placeholder shown in the API key field per provider — cosmetic only, not a
+// capability check (that comes from GET /api/providers via useProviders below).
+const KEY_PLACEHOLDERS = {
+  anthropic: { admin: 'sk-ant-admin-…', sdk: 'sk-ant-api03-…' },
+  gemini:    { sdk: 'AIza…' },
+  grok:      { sdk: 'xai-…', admin: 'xai management key' },
+  kimi:      { sdk: 'sk-…' },
+  deepinfra: { sdk: 'DeepInfra API key' },
+  openai:    { admin: 'sk-admin-…', sdk: 'sk-proj-…' },
+};
 
 function AddKeyForm({ onSaved, onCancel }) {
   const { apiFetch } = useApi();
   const { t } = useTranslation();
-  const [form, setForm]   = useState({ provider: 'anthropic', key_type: 'sdk', label: '', value: '' });
+  // Which providers can take an admin/org-level key, which need a
+  // provider_account_id alongside it (Grok's xAI team id), and the admin-key
+  // help text — all capability-driven (GET /api/providers), never a hardcoded
+  // provider list here: that's exactly what left Grok stuck on 'sdk' after it
+  // grew full admin-key billing support.
+  const { providers } = useProviders();
+  const byId = Object.fromEntries(providers.map(p => [p.id, p]));
+  const canAdmin = (p) => Boolean(byId[p]?.adminKey);
+  const needsAccountId = (p) => byId[p]?.accountId === 'required';
+
+  const [form, setForm] = useState({ provider: 'anthropic', key_type: 'sdk', label: '', value: '', provider_account_id: '' });
   const [show, setShow]   = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
@@ -109,25 +175,27 @@ function AddKeyForm({ onSaved, onCancel }) {
 
   const handleSave = async () => {
     if (!form.label.trim() || !form.value.trim()) return;
+    if (form.key_type === 'admin' && needsAccountId(form.provider) && !form.provider_account_id.trim()) return;
     setSaving(true); setError('');
     try {
-      const res = await apiFetch('/api/credentials', { method: 'POST', body: JSON.stringify(form) });
+      const payload = { provider: form.provider, key_type: form.key_type, label: form.label, value: form.value };
+      if (form.key_type === 'admin' && needsAccountId(form.provider)) {
+        payload.provider_account_id = form.provider_account_id.trim();
+      }
+      const res = await apiFetch('/api/credentials', { method: 'POST', body: JSON.stringify(payload) });
       const d = await res.json();
       if (res.ok) { onSaved(d.data); }
       else { setError(Array.isArray(d.error) ? d.error.map(e => e.message).join(', ') : (d.error || 'Error saving')); }
     } catch { setError('Connection error'); } finally { setSaving(false); }
   };
 
-  const phLabel = form.provider === 'anthropic' ? (form.key_type === 'admin' ? 'sk-ant-admin-…' : 'sk-ant-api03-…')
-    : form.provider === 'gemini' ? 'AIza…'
-    : form.provider === 'grok' ? 'xai-…'
-    : form.provider === 'kimi' ? 'sk-…'
-    : form.provider === 'deepinfra' ? 'DeepInfra API key'
-    : (form.key_type === 'admin' ? 'sk-admin-…' : 'sk-proj-…');
+  const phLabel = KEY_PLACEHOLDERS[form.provider]?.[form.key_type] || KEY_PLACEHOLDERS[form.provider]?.sdk || 'sk-…';
+  const showAccountId = form.key_type === 'admin' && needsAccountId(form.provider);
+  const adminHelp = form.key_type === 'admin' ? byId[form.provider]?.adminKeyHelp : null;
 
   return (
     <div style={{ padding: '14px 0', borderBottom: '1px solid var(--border-soft)', marginBottom: 4 }}>
-      <div className="obs-row-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr auto auto', gap: 10, alignItems: 'flex-end' }}>
+      <div className="obs-row-grid" style={{ display: 'grid', gridTemplateColumns: showAccountId ? '1fr 1fr 1.6fr 1fr auto auto' : '1fr 1fr 2fr auto auto', gap: 10, alignItems: 'flex-end' }}>
         <div className="obs-field">
           <label>{t('settings.keys.labelField')}</label>
           <input className="obs-input obs-input-lg" placeholder={t('settings.keys.labelPlaceholder')} value={form.label} onChange={e => set('label', e.target.value)} />
@@ -137,18 +205,13 @@ function AddKeyForm({ onSaved, onCancel }) {
           <div style={{ display: 'flex', gap: 6 }}>
             <select className="obs-select" style={{ height: 36, flex: 1 }} value={form.provider} onChange={e => {
               const provider = e.target.value;
-              setForm(f => ({ ...f, provider, key_type: SDK_ONLY_PROVIDERS.includes(provider) ? 'sdk' : f.key_type }));
+              setForm(f => ({ ...f, provider, key_type: canAdmin(provider) ? f.key_type : 'sdk', provider_account_id: '' }));
             }}>
-              <option value="anthropic">Anthropic</option>
-              <option value="openai">OpenAI</option>
-              <option value="gemini">Gemini</option>
-              <option value="grok">Grok</option>
-              <option value="kimi">Kimi</option>
-              <option value="deepinfra">DeepInfra</option>
+              {providers.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
-            <select className="obs-select" style={{ height: 36, flex: 1 }} value={form.key_type} disabled={SDK_ONLY_PROVIDERS.includes(form.provider)} onChange={e => set('key_type', e.target.value)}>
+            <select className="obs-select" style={{ height: 36, flex: 1 }} value={form.key_type} disabled={!canAdmin(form.provider)} onChange={e => set('key_type', e.target.value)}>
               <option value="sdk">{t('settings.keys.sdkType')}</option>
-              {!SDK_ONLY_PROVIDERS.includes(form.provider) && <option value="admin">{t('settings.keys.adminType')}</option>}
+              {canAdmin(form.provider) && <option value="admin">{t('settings.keys.adminType')}</option>}
             </select>
           </div>
         </div>
@@ -166,7 +229,15 @@ function AddKeyForm({ onSaved, onCancel }) {
             style={{ position: 'absolute', right: 8, bottom: 8, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11 }}>
             {show ? t('auth.hidePassword') : t('auth.showPassword')}
           </button>
+          {adminHelp && <div style={{ position: 'absolute', top: '100%', marginTop: 4, fontSize: 10.5, color: 'var(--muted)', lineHeight: 1.4 }}>{adminHelp}</div>}
         </div>
+        {showAccountId && (
+          <div className="obs-field">
+            <label>{t('settings.keys.accountIdField')}</label>
+            <input className="obs-input obs-input-lg" placeholder={t('settings.keys.accountIdPlaceholder')}
+              value={form.provider_account_id} onChange={e => set('provider_account_id', e.target.value)} />
+          </div>
+        )}
         <button className="obs-btn" onClick={onCancel} style={{ alignSelf: 'flex-end', height: 36 }}>{t('common.cancel')}</button>
         <button className="obs-btn obs-btn-primary" disabled={saving} onClick={handleSave} style={{ alignSelf: 'flex-end', height: 36 }}>
           {saving ? '…' : t('common.save')}
@@ -313,6 +384,7 @@ export default function Keys({ darkMode, onToggleDarkMode }) {
 
   const handleDeleted = (id) => setCredentials(cs => cs.filter(c => c.id !== id));
   const handleTested  = (id, isValid) => setCredentials(cs => cs.map(c => c.id === id ? { ...c, is_valid: isValid, last_tested_at: new Date().toISOString() } : c));
+  const handleUpdated = (id, updated) => setCredentials(cs => cs.map(c => c.id === id ? updated : c));
   const handleSaved   = (cred) => { setCredentials(cs => [cred, ...cs]); setShowForm(false); };
 
   const sdkKeys   = credentials.filter(c => c.key_type === 'sdk');
@@ -335,7 +407,7 @@ export default function Keys({ darkMode, onToggleDarkMode }) {
         ) : sdkKeys.length === 0 && !showForm ? (
           <div style={{ fontSize: 12, color: 'var(--muted)', padding: '12px 0' }}>{t('settings.keys.noSdk')}</div>
         ) : (
-          sdkKeys.map(c => <KeyRow key={c.id} cred={c} onDeleted={handleDeleted} onTested={handleTested} isAdmin={isAdmin} />)
+          sdkKeys.map(c => <KeyRow key={c.id} cred={c} onDeleted={handleDeleted} onTested={handleTested} onUpdated={handleUpdated} isAdmin={isAdmin} />)
         )}
 
         <div style={{ marginTop: 28, display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -345,7 +417,7 @@ export default function Keys({ darkMode, onToggleDarkMode }) {
         {!loading && adminKeys.length === 0 ? (
           <div style={{ fontSize: 12, color: 'var(--muted)', padding: '12px 0' }}>{t('settings.keys.noAdmin')}</div>
         ) : (
-          adminKeys.map(c => <KeyRow key={c.id} cred={c} onDeleted={handleDeleted} onTested={handleTested} isAdmin={isAdmin} />)
+          adminKeys.map(c => <KeyRow key={c.id} cred={c} onDeleted={handleDeleted} onTested={handleTested} onUpdated={handleUpdated} isAdmin={isAdmin} />)
         )}
 
         <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--muted)' }}>

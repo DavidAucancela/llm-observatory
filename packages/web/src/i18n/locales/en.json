@@ -468,6 +468,8 @@
       "sdkType": "SDK",
       "adminType": "Admin",
       "apiKeyField": "API Key",
+      "accountIdField": "Team / Account ID",
+      "accountIdPlaceholder": "Copied from the provider's console",
       "untested": "Untested",
       "valid": "Valid",
       "invalid": "Invalid",
