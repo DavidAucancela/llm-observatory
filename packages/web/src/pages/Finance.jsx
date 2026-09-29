@@ -131,7 +131,10 @@ function BalancesTab({ rangeParams, configuredProviders, onChanged }) {
   // with an admin key/billing API just also get synced spend. Offer the org's
   // configured providers, or all of them if none is configured yet.
   const providerOptions = configuredProviders.length ? configuredProviders : allProviderIds;
-  const formProvider = providerOptions.includes(form.provider) ? form.provider : providerOptions[0];
+  // providerOptions[0] is only undefined if useProviders' own hardcoded fallback
+  // list were ever emptied — defensive, so the <select> below never goes
+  // uncontrolled (value={undefined}) and a submit never sends provider: undefined.
+  const formProvider = providerOptions.includes(form.provider) ? form.provider : (providerOptions[0] || '');
 
   // Latest-request-wins: fetchData is also called after add/delete, and a slow
   // response for a previous range must not overwrite the current one.
