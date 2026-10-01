@@ -42,7 +42,8 @@
     "rangeErrOrder": "Start must be on or before end",
     "rangeErrFuture": "Dates can't be in the future",
     "rangeErrTooLong": "Range too long (max 366 days)",
-    "rangeUtcHint": "Days are UTC"
+    "rangeErrRetention": "That start date is older than the {{days}}-day data retention window",
+    "rangeRetentionHint": "Data available from {{date}}"
   },
   "common": {
     "save": "Save",
@@ -261,10 +262,11 @@
     "requestsOverTime": "Requests over time",
     "costOverTime": "Cost over time",
     "latencyOverTime": "Avg latency over time",
-    "errorRateOverTime": "Error rate over time",
-    "errorRate": "Error rate",
     "comparePrevToggle": "vs. previous period",
     "prevPeriodLabel": "Previous period",
+    "projectionToggle": "Projection",
+    "projectionComingSoon": "Forecast for the current period — coming soon",
+    "comingSoon": "SOON",
     "insights": {
       "severityCritical": "Critical",
       "severityWarning": "Warning",

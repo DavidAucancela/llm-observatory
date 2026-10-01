@@ -14,7 +14,6 @@ import { RANGE_PRESETS, buildRangeParams, todayUtc } from '../utils/dateRange';
 import { buildGrid } from '../utils/metricGrid';
 import { PROVIDER_COLORS } from '../utils/providerColors';
 import { shortModelName } from '../utils/modelAlias';
-import { errorRateSeverity, severityColor } from '../utils/severity';
 
 // three.js + @react-three/fiber/drei add ~800KB minified — lazy-load so the
 // bundle for every other route stays light; only the Dashboard route pays for it.
@@ -87,7 +86,6 @@ const METRIC_HEADER_KEYS = {
   tokens:    'dashboard.tokensOverTime',
   cost:      'dashboard.costOverTime',
   latency:   'dashboard.latencyOverTime',
-  errorRate: 'dashboard.errorRateOverTime',
 };
 
 // ── Provider breakdown with bars ──────────────────────────────────────────────
@@ -610,17 +608,6 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   const reqSpark    = timeSeries.map(r => r.requests);
   const costSpark   = timeSeries.map(r => r.cost);
 
-  const errorCount = parseInt(s?.error_count || 0);
-  const totalReqs  = parseInt(s?.total_requests || 0);
-  const errorPct   = totalReqs > 0 ? (errorCount / totalReqs) * 100 : 0;
-  const errorRate  = `${errorPct.toFixed(1)}% (${errorCount})`;
-  const errSeverity = errorRateSeverity(errorPct);
-
-  const prevErrorCount = parseInt(prev?.error_count || 0);
-  const prevTotalReqs  = parseInt(prev?.total_requests || 0);
-  const prevErrorPct   = prevTotalReqs > 0 ? (prevErrorCount / prevTotalReqs) * 100 : 0;
-  const errorDelta      = calcDelta(errorPct, prevErrorPct);
-
   if (!loading && !hasCredentials) {
     return (
       <main className="obs-main">
@@ -769,16 +756,6 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
             accentColor="var(--latency-color)"
             active={activeMetric === 'latency'}
             onClick={() => setActiveMetric('latency')}
-          />
-          <KpiCard
-            label={t('dashboard.errorRate')}
-            value={loading ? '—' : errorRate}
-            delta={errorDelta}
-            inverse
-            accentColor={severityColor(errSeverity)}
-            highlight={!loading && errSeverity !== 'ok'}
-            active={activeMetric === 'errorRate'}
-            onClick={() => setActiveMetric('errorRate')}
           />
         </div>
 

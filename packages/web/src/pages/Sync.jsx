@@ -6,7 +6,8 @@ import TopBar from '../components/TopBar';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../auth/AuthProvider';
 import { fmtDateTime, fmtRangeShort } from '../utils/fmt';
-import { customRangeError, isValidDateOnly, todayUtc } from '../utils/dateRange';
+import { customRangeError, earliestAvailableDay, isValidDateOnly, todayUtc } from '../utils/dateRange';
+import { useRetention } from '../hooks/useRetention';
 
 const dayOf = (iso) => (iso ? String(iso).slice(0, 10) : '');
 
@@ -24,7 +25,7 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
   const prefilled = isValidDateOnly(qStart) && isValidDateOnly(qEnd);
 
   const [providers, setProviders] = useState([]);           // sync-capable, from GET /api/providers
-  const [retentionDays, setRetentionDays] = useState(null);
+  const retentionDays = useRetention();
   const [logs, setLogs]         = useState([]);
   const [syncing, setSyncing]   = useState({});
   const [clearing, setClearing] = useState({});
@@ -44,10 +45,6 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
     apiFetch('/api/providers').then(r => r.json())
       .then(d => setProviders((d.providers || []).filter(p => p.sync).map(p => p.id)))
       .catch(() => {});
-    // retention_days is only reported by the coverage endpoint; any valid range works.
-    apiFetch('/api/metrics/coverage?range=7d').then(r => r.json())
-      .then(d => setRetentionDays(d.retention_days ?? null))
-      .catch(() => {});
   }, []);
 
   // A sync runs in the background on the server; keep polling while any log is
@@ -59,7 +56,8 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
     return () => clearInterval(id);
   }, [anyRunning, fetchLogs]);
 
-  const rangeError = mode === 'range' ? customRangeError(from, to, today) : null;
+  const minDay = earliestAvailableDay(today, retentionDays);
+  const rangeError = mode === 'range' ? customRangeError(from, to, today, retentionDays) : null;
   const rangeReady = mode === 'days' || (Boolean(from && to) && !rangeError);
 
   const handleSync = async (provider) => {
@@ -120,16 +118,14 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
               <>
                 <label style={{ fontSize: 12, color: 'var(--muted)' }} htmlFor="sync-from">{t('settings.sync.from')}</label>
                 <input id="sync-from" type="date" className="obs-input" style={{ height: 30 }}
-                  value={from} max={to || today} onChange={e => setFrom(e.target.value)} />
+                  value={from} min={minDay} max={to || today} onChange={e => setFrom(e.target.value)} />
                 <label style={{ fontSize: 12, color: 'var(--muted)' }} htmlFor="sync-to">{t('settings.sync.to')}</label>
                 <input id="sync-to" type="date" className="obs-input" style={{ height: 30 }}
-                  value={to} min={from || undefined} max={today} onChange={e => setTo(e.target.value)} />
+                  value={to} min={from || minDay} max={today} onChange={e => setTo(e.target.value)} />
               </>
             )}
-            {rangeError && <span role="alert" style={{ fontSize: 11, color: 'var(--error)' }}>{t(rangeError)}</span>}
-            {retentionDays != null && (
-              <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t('settings.sync.retentionNote', { days: retentionDays })}</span>
-            )}
+            {rangeError && <span role="alert" style={{ fontSize: 11, color: 'var(--error)' }}>{t(rangeError, { days: retentionDays })}</span>}
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t('settings.sync.retentionNote', { days: retentionDays })}</span>
           </div>
         )}
 

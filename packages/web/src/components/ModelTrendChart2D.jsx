@@ -36,10 +36,26 @@ function RealDataDot({ cx, cy, payload, dataKey, color }) {
 
 function CustomTooltip({ active, payload, label, metric }) {
   if (!active || !payload?.length) return null;
-  const sorted = [...payload].sort((a, b) => b.value - a.value);
+  // `grid.models` (and so `payload`) is every model with activity ANYWHERE in
+  // the selected range — a model quiet on this particular day still gets a
+  // zero-filled point so its line stays continuous. Listing it here too just
+  // clutters the popup with "0 —" rows for whichever models weren't active
+  // that day; drop them the same way RealDataDot already decides "was this
+  // point real" (by requests, not by the plotted value — a metric can
+  // legitimately be 0 on a real datapoint). `__prev` isn't a per-model row
+  // and has no `__reqs` counter, so it's kept unconditionally — except when
+  // its value is null (Dashboard.jsx sets `row.__prev = prevSeries[hi] ?? null`
+  // for a bucket the previous period has no data for at all): showing that
+  // as "Previous period: $0.00" would misreport "no data" as "zero spend".
+  const sorted = [...payload]
+    .filter(entry => entry.dataKey === '__prev' ? entry.value != null : (entry.payload?.[`${entry.dataKey}__reqs`] || 0) > 0)
+    .sort((a, b) => b.value - a.value);
   return (
     <div className="chart2d-tooltip">
       <div className="chart2d-tooltip-label">{label}</div>
+      {sorted.length === 0 && (
+        <div className="chart2d-tooltip-empty">—</div>
+      )}
       {sorted.map(entry => {
         const requests = entry.payload?.[`${entry.dataKey}__reqs`] || 0;
         return (
@@ -48,9 +64,7 @@ function CustomTooltip({ active, payload, label, metric }) {
             <span className="chart2d-tooltip-name">{entry.name || entry.dataKey}</span>
             <span className="chart2d-tooltip-value">{formatMetricValue(entry.value, metric)}</span>
             {entry.dataKey !== '__prev' && (
-              <span className="chart2d-tooltip-reqs">
-                {requests > 0 ? `${requests}×` : '—'}
-              </span>
+              <span className="chart2d-tooltip-reqs">{requests}×</span>
             )}
           </div>
         );
@@ -62,11 +76,26 @@ function CustomTooltip({ active, payload, label, metric }) {
 // `prevSeries`, when given, must already be aligned index-for-index with the
 // trimmed grid (see Dashboard.jsx — it slices by grid.labelOffset/hours.length
 // before passing down), so this component never needs to know about trimming.
+// Shared by every Line (model lines + the previous-period overlay) so the
+// chart reads as one system instead of a mix of animated/static, straight/
+// curved series — that mismatch (prev period smoothed + always animating,
+// model lines linear + never animating) was the original bug report.
+const LINE_ANIMATION_MS = 700;
+
 export default function ModelTrendChart2D({ modelTimeSeries, metric, xLabels, loading, hiddenModels = new Set(), prevSeries = null, modelToProvider = {} }) {
   const { t } = useTranslation();
   const palette = useThemePalette();
   const grid = useMemo(() => buildGrid(modelTimeSeries || [], metric), [modelTimeSeries, metric]);
   const providerIndices = useMemo(() => modelProviderIndices(grid.models, modelToProvider), [grid.models, modelToProvider]);
+
+  // "Invocation" effect on appear is the Line's own draw-in animation
+  // (isAnimationActive below); this flag drives a distinct "settle" effect
+  // once that finishes — a brief glow pulse (see .chart2d-draw-complete in
+  // index.css) instead of the lines just stopping. Reset whenever the
+  // series actually changes (new range, new live metric, toggled metric) so
+  // the reveal replays instead of only ever firing once per page load.
+  const [justRevealed, setJustRevealed] = useState(false);
+  useEffect(() => { setJustRevealed(false); }, [modelTimeSeries, metric]);
 
   // Real request counts per (hour, model), independent of the selected
   // metric — a metric value can legitimately be 0 on a real datapoint (e.g.
@@ -110,7 +139,15 @@ export default function ModelTrendChart2D({ modelTimeSeries, metric, xLabels, lo
 
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <LineChart
+        data={data}
+        margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+        // "Complete" effect: a brief glow pulse across every line's group
+        // once its draw-in animation finishes (see the keyframe in
+        // index.css) — Recharts applies a component's className to its
+        // rendered <svg>, so this reaches every descendant .recharts-line.
+        className={justRevealed ? 'chart2d-draw-complete' : ''}
+      >
         <CartesianGrid strokeDasharray="3 3" stroke={palette.border} vertical={false} />
         <XAxis dataKey="name" stroke={palette.muted} tick={{ fontSize: 11, fill: palette.muted }} tickLine={false} axisLine={{ stroke: palette.border }} />
         <YAxis
@@ -133,14 +170,20 @@ export default function ModelTrendChart2D({ modelTimeSeries, metric, xLabels, lo
               // two very different consecutive bucket values (e.g. a burst hour
               // next to an empty one), exaggerating the shape of what's really
               // just a couple of isolated datapoints — linear draws exactly
-              // what the buckets say, no more.
+              // what the buckets say, no more. The previous-period line below
+              // uses the same type now, for the same reason (it used to be
+              // "monotone" — curved — while these were straight, an
+              // inconsistency with no data-shape justification).
               type="linear"
               stroke={color}
               strokeWidth={2}
               dot={(props) => <RealDataDot key={`${model}-${props.payload?.name}`} {...props} color={color} />}
               hide={hiddenModels.has(model)}
               activeDot={{ r: 4 }}
-              isAnimationActive={false}
+              isAnimationActive
+              animationDuration={LINE_ANIMATION_MS}
+              animationEasing="ease-out"
+              onAnimationEnd={() => setJustRevealed(true)}
             />
           );
         })}
@@ -148,13 +191,16 @@ export default function ModelTrendChart2D({ modelTimeSeries, metric, xLabels, lo
           <Line
             dataKey="__prev"
             name={t('dashboard.prevPeriodLabel')}
-            type="monotone"
+            type="linear"
             stroke={palette.muted}
             strokeWidth={2}
             strokeDasharray="5 4"
             dot={false}
             activeDot={{ r: 3 }}
-            isAnimationActive={false}
+            isAnimationActive
+            animationDuration={LINE_ANIMATION_MS}
+            animationEasing="ease-out"
+            onAnimationEnd={() => setJustRevealed(true)}
           />
         )}
       </LineChart>
