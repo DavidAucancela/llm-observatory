@@ -10,3 +10,24 @@ graphify-out/
 .claude/settings.local.json
 .claude/.claude/
 .claude/scheduled_tasks.lock
+
+# AI assistant instructions/context — local-only from here on, not shared via
+# git (matches at any depth: CLAUDE.md, packages/*/CLAUDE.md, .claude/CLAUDE.md).
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+
+# Local config/cache for other AI coding tools — never meant to be versioned.
+.cursor/
+.windsurf/
+.continue/
+.codeium/
+.aider*
+
+# Personal notes/drafts kept loose in the working tree, never meant for the repo.
+NOTES.md
+TODO.md
+notes/
+drafts/
+scratch/
+*.local.md
