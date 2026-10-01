@@ -39,7 +39,14 @@ export function todayUtc() {
  * the org-wide `DATA_RETENTION_DAYS` (default 90, see useRetention()).
  */
 export function earliestAvailableDay(today = todayUtc(), retentionDays = 90) {
-  const ms = Date.parse(`${today}T00:00:00Z`) - (retentionDays - 1) * DAY_MS;
+  const base = Date.parse(`${today}T00:00:00Z`);
+  // Every real caller passes a `today` from todayUtc() itself, so this is
+  // unreachable today — but `new Date(NaN).toISOString()` throws a
+  // RangeError rather than returning a sentinel, and that would otherwise
+  // propagate out of customRangeError() and crash the picker over a bad
+  // "today" instead of just skipping the retention check.
+  if (!Number.isFinite(base)) return today;
+  const ms = base - (retentionDays - 1) * DAY_MS;
   return new Date(ms).toISOString().slice(0, 10);
 }
 

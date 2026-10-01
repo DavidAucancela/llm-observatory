@@ -43,9 +43,12 @@ function CustomTooltip({ active, payload, label, metric }) {
   // that day; drop them the same way RealDataDot already decides "was this
   // point real" (by requests, not by the plotted value — a metric can
   // legitimately be 0 on a real datapoint). `__prev` isn't a per-model row
-  // and has no `__reqs` counter, so it always stays.
+  // and has no `__reqs` counter, so it's kept unconditionally — except when
+  // its value is null (Dashboard.jsx sets `row.__prev = prevSeries[hi] ?? null`
+  // for a bucket the previous period has no data for at all): showing that
+  // as "Previous period: $0.00" would misreport "no data" as "zero spend".
   const sorted = [...payload]
-    .filter(entry => entry.dataKey === '__prev' || (entry.payload?.[`${entry.dataKey}__reqs`] || 0) > 0)
+    .filter(entry => entry.dataKey === '__prev' ? entry.value != null : (entry.payload?.[`${entry.dataKey}__reqs`] || 0) > 0)
     .sort((a, b) => b.value - a.value);
   return (
     <div className="chart2d-tooltip">
