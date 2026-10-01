@@ -146,16 +146,13 @@ function AccountMenu({ darkMode, onToggleDarkMode }) {
   );
 }
 
-// Unified top bar rendered by every page: section title, optional date range
-// filter, notifications and account (language now lives inside the account
-// menu, see AccountMenu) — replaces the old mix of a per-page header plus
-// globally fixed theme toggle / notification bell.
-export default function TopBar({
-  title, ranges, range, onRangeChange,
-  customRange, onCustomRangeApply,
-  darkMode, onToggleDarkMode,
-}) {
-  const { openSidebar } = useSidebar();
+// Preset buttons + the custom-range popover. Split out of TopBar so
+// useRetention() (and the fetch it triggers) only ever mounts on pages that
+// actually pass `ranges` — TopBar itself is rendered on every page (Keys,
+// Sync, Settings included), and React's rules of hooks don't allow calling
+// useRetention() conditionally inside TopBar, so the only way to skip the
+// fetch on pages with no date filter is to keep it out of TopBar entirely.
+function RangeFilter({ ranges, range, onRangeChange, customRange, onCustomRangeApply }) {
   const { t, i18n } = useTranslation();
   const [customOpen, setCustomOpen] = useState(false);
   const [draftStart, setDraftStart] = useState('');
@@ -180,6 +177,9 @@ export default function TopBar({
   const openCustomPanel = () => {
     // Seed the draft from whatever custom range is already active (or blank
     // for a first-time pick) every time the panel opens, not just on mount.
+    // Refreshing `today` here (not just on mount) is also what keeps minDay/
+    // max in sync with the real date for a tab left open across midnight —
+    // the picker only needs to be accurate while it's actually open.
     setDraftStart(customRange?.start || '');
     setDraftEnd(customRange?.end || '');
     setToday(todayUtc());
@@ -194,6 +194,74 @@ export default function TopBar({
     : t('topbar.rangeCustom');
 
   return (
+    <>
+      <div className="obs-divider-v" />
+      <div className="obs-range-wrap" ref={wrapRef}>
+        <div className="obs-range-picker">
+          {ranges.map(r => (
+            <button
+              key={r}
+              className={`obs-range-btn${range === r ? ' active' : ''}`}
+              onClick={() => { setCustomOpen(false); onRangeChange(r); }}
+            >{t(RANGE_LABEL_I18N_KEYS[r] || r)}</button>
+          ))}
+          {onCustomRangeApply && (
+            <button
+              type="button"
+              className={`obs-range-btn${range === 'custom' ? ' active' : ''}`}
+              onClick={openCustomPanel}
+            >{customLabel}</button>
+          )}
+        </div>
+
+        {customOpen && (
+          <div className="obs-range-custom-panel">
+            <div className="obs-field">
+              <label htmlFor="range-from">{t('topbar.rangeFrom')}</label>
+              <input
+                id="range-from" type="date" className="obs-input"
+                value={draftStart} min={minDay} max={draftEnd || today}
+                onChange={e => setDraftStart(e.target.value)}
+              />
+            </div>
+            <div className="obs-field">
+              <label htmlFor="range-to">{t('topbar.rangeTo')}</label>
+              <input
+                id="range-to" type="date" className="obs-input"
+                value={draftEnd} min={draftStart || minDay} max={today}
+                onChange={e => setDraftEnd(e.target.value)}
+              />
+            </div>
+            <div style={{ fontSize: 11, color: draftError ? 'var(--danger, #e5484d)' : 'var(--text-muted, inherit)', opacity: draftError ? 1 : 0.7 }} role={draftError ? 'alert' : undefined}>
+              {draftError
+                ? t(draftError, { days: retentionDays })
+                : t('topbar.rangeRetentionHint', { date: fmtDateShort(minDay, i18n.language) })}
+            </div>
+            <button
+              type="button"
+              className="obs-btn obs-btn-primary"
+              disabled={!canApply}
+              onClick={() => { onCustomRangeApply({ start: draftStart, end: draftEnd }); setCustomOpen(false); }}
+            >{t('topbar.rangeApply')}</button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// Unified top bar rendered by every page: section title, optional date range
+// filter, notifications and account (language now lives inside the account
+// menu, see AccountMenu) — replaces the old mix of a per-page header plus
+// globally fixed theme toggle / notification bell.
+export default function TopBar({
+  title, ranges, range, onRangeChange,
+  customRange, onCustomRangeApply,
+  darkMode, onToggleDarkMode,
+}) {
+  const { openSidebar } = useSidebar();
+
+  return (
     <div className="obs-header">
       <button
         type="button"
@@ -206,59 +274,13 @@ export default function TopBar({
       <div className="obs-page-title">{title}</div>
 
       {ranges && (
-        <>
-          <div className="obs-divider-v" />
-          <div className="obs-range-wrap" ref={wrapRef}>
-            <div className="obs-range-picker">
-              {ranges.map(r => (
-                <button
-                  key={r}
-                  className={`obs-range-btn${range === r ? ' active' : ''}`}
-                  onClick={() => { setCustomOpen(false); onRangeChange(r); }}
-                >{t(RANGE_LABEL_I18N_KEYS[r] || r)}</button>
-              ))}
-              {onCustomRangeApply && (
-                <button
-                  type="button"
-                  className={`obs-range-btn${range === 'custom' ? ' active' : ''}`}
-                  onClick={openCustomPanel}
-                >{customLabel}</button>
-              )}
-            </div>
-
-            {customOpen && (
-              <div className="obs-range-custom-panel">
-                <div className="obs-field">
-                  <label htmlFor="range-from">{t('topbar.rangeFrom')}</label>
-                  <input
-                    id="range-from" type="date" className="obs-input"
-                    value={draftStart} min={minDay} max={draftEnd || today}
-                    onChange={e => setDraftStart(e.target.value)}
-                  />
-                </div>
-                <div className="obs-field">
-                  <label htmlFor="range-to">{t('topbar.rangeTo')}</label>
-                  <input
-                    id="range-to" type="date" className="obs-input"
-                    value={draftEnd} min={draftStart || minDay} max={today}
-                    onChange={e => setDraftEnd(e.target.value)}
-                  />
-                </div>
-                <div style={{ fontSize: 11, color: draftError ? 'var(--danger, #e5484d)' : 'var(--text-muted, inherit)', opacity: draftError ? 1 : 0.7 }} role={draftError ? 'alert' : undefined}>
-                  {draftError
-                    ? t(draftError, { days: retentionDays })
-                    : t('topbar.rangeRetentionHint', { date: fmtDateShort(minDay, i18n.language) })}
-                </div>
-                <button
-                  type="button"
-                  className="obs-btn obs-btn-primary"
-                  disabled={!canApply}
-                  onClick={() => { onCustomRangeApply({ start: draftStart, end: draftEnd }); setCustomOpen(false); }}
-                >{t('topbar.rangeApply')}</button>
-              </div>
-            )}
-          </div>
-        </>
+        <RangeFilter
+          ranges={ranges}
+          range={range}
+          onRangeChange={onRangeChange}
+          customRange={customRange}
+          onCustomRangeApply={onCustomRangeApply}
+        />
       )}
 
       <div className="obs-header-right">
