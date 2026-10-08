@@ -1,12 +1,17 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Default history kept when DATA_RETENTION_DAYS is unset: 3 years, so the date
+// filter can show usage from "2+ years ago" straight from the DB instead of
+// needing a re-sync. Was 90 days, which silently purged months-old usage.
+const DEFAULT_RETENTION_DAYS = 1095;
+
 // How long api_calls rows are kept — one definition shared by the nightly purge
 // (index.js) and everything that must not import/promise data the purge will
 // delete (range sync, coverage). Was inlined in the cron with no NaN guard: a
 // bad DATA_RETENTION_DAYS made `Math.max(1, NaN)` NaN and the purge a no-op.
 function retentionDays() {
-  const n = parseInt(process.env.DATA_RETENTION_DAYS || '90', 10);
-  return Number.isFinite(n) ? Math.max(1, n) : 90;
+  const n = parseInt(process.env.DATA_RETENTION_DAYS || String(DEFAULT_RETENTION_DAYS), 10);
+  return Number.isFinite(n) ? Math.max(1, n) : DEFAULT_RETENTION_DAYS;
 }
 
 const floorUtcDay = (ms) => Math.floor(ms / DAY_MS) * DAY_MS;
@@ -20,4 +25,4 @@ function retentionCutoffMs(now = Date.now(), days = retentionDays()) {
   return ceilUtcDay(now - days * DAY_MS);
 }
 
-module.exports = { DAY_MS, retentionDays, floorUtcDay, ceilUtcDay, retentionCutoffMs };
+module.exports = { DAY_MS, DEFAULT_RETENTION_DAYS, retentionDays, floorUtcDay, ceilUtcDay, retentionCutoffMs };

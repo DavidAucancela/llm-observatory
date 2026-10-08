@@ -1,4 +1,4 @@
-const { parseRange, appendTimeWindow, RangeParamError, DAY_MS } = require('../utils/dateRange');
+const { parseRange, appendTimeWindow, bucketUnitFor, RangeParamError, DAY_MS } = require('../utils/dateRange');
 
 const bad = (query, opts, re) => {
   let err;
@@ -64,9 +64,24 @@ describe('parseRange — custom windows', () => {
   it('rejects start after end', () => {
     bad({ start: '2026-07-16', end: '2026-07-15' }, undefined, /after end/);
   });
-  it('caps the span', () => {
-    expect(() => parseRange({ start: '2025-07-15', end: '2026-07-15' })).not.toThrow(); // 366 days
-    bad({ start: '2024-01-01', end: '2026-07-15' }, undefined, /too long/);
+  it('caps the span at ~5 years (multi-year history is allowed)', () => {
+    expect(() => parseRange({ start: '2024-01-01', end: '2026-07-15' })).not.toThrow(); // ~2.5 years
+    expect(() => parseRange({ start: '2021-07-17', end: '2026-07-20' })).not.toThrow(); // 1830 days
+    bad({ start: '2020-01-01', end: '2026-07-15' }, undefined, /too long/);
+  });
+});
+
+describe('bucketUnitFor', () => {
+  const custom = (start, end) => parseRange({ start, end });
+  it('presets keep hour (24h) / day (everything else)', () => {
+    expect(bucketUnitFor(parseRange({ range: '24h' }))).toBe('hour');
+    expect(bucketUnitFor(parseRange({ range: '30d' }))).toBe('day');
+  });
+  it('custom windows coarsen with their span', () => {
+    expect(bucketUnitFor(custom('2026-07-15', '2026-07-15'))).toBe('hour');
+    expect(bucketUnitFor(custom('2026-04-01', '2026-07-15'))).toBe('day');   // ~106 days
+    expect(bucketUnitFor(custom('2025-07-15', '2026-07-15'))).toBe('week');  // 1 year
+    expect(bucketUnitFor(custom('2023-07-15', '2026-07-15'))).toBe('month'); // 3 years
   });
 });
 

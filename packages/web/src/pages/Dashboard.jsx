@@ -506,13 +506,17 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   }
   const prevTimeSeries = Object.values(prevHourMap).sort((a, b) => new Date(a.hour) - new Date(b.hour));
 
-  // 24h uses hourly buckets → show hours; all other ranges use daily buckets → show dates.
-  const useDate = range !== '24h';
+  // Bucket size comes from the API (hour/day/week/month — long custom ranges
+  // are coarsened server-side). Day+ buckets are UTC midnights, so format them
+  // in UTC: in a negative-offset zone the local date would be the day before.
+  const bucketUnit = summary?.bucket_unit || (range === '24h' ? 'hour' : 'day');
   const axisLocale = i18n.language === 'es' ? 'es-ES' : 'en-US';
   const xLabels = timeSeries.map(r => {
     const d = new Date(r.hour);
-    if (useDate) return d.toLocaleDateString(axisLocale, { month: 'short', day: 'numeric' });
-    return `${String(d.getHours()).padStart(2, '0')}:00`;
+    if (bucketUnit === 'hour') return `${String(d.getHours()).padStart(2, '0')}:00`;
+    if (bucketUnit === 'month') return d.toLocaleDateString(axisLocale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
+    if (bucketUnit === 'week') return d.toLocaleDateString(axisLocale, { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' });
+    return d.toLocaleDateString(axisLocale, { month: 'short', day: 'numeric', timeZone: 'UTC' });
   });
 
   const byProvider     = summary?.by_provider     || [];

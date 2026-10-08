@@ -216,7 +216,7 @@ async function startServer() {
     runReconciliation();
   });
 
-  // Cron: data retention — delete records older than DATA_RETENTION_DAYS (default 90) at 02:00 daily
+  // Cron: data retention — delete records older than DATA_RETENTION_DAYS (default 1095 = 3y) at 02:00 daily
   cron.schedule('0 2 * * *', async () => {
     const days = retentionDays();
     try {

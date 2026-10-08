@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthProvider';
 import NotificationBell from './NotificationBell';
 import { useSidebar } from '../contexts/SidebarContext';
 import { fmtRangeShort, fmtDateShort } from '../utils/fmt';
-import { RANGE_LABEL_I18N_KEYS, todayUtc, customRangeError, earliestAvailableDay } from '../utils/dateRange';
+import { RANGE_LABEL_I18N_KEYS, QUICK_RANGES, todayUtc, customRangeError, earliestAvailableDay, quickRangeDates } from '../utils/dateRange';
 import { useRetention } from '../hooks/useRetention';
 
 function IconHamburger() {
@@ -161,8 +161,8 @@ function RangeFilter({ ranges, range, onRangeChange, customRange, onCustomRangeA
   // would go stale in a tab left open past midnight).
   const [today, setToday] = useState(todayUtc);
   const wrapRef = useRef(null);
-  // Data retention window (default 90d) — bounds how far back the picker lets
-  // you go, instead of accepting any date up to MAX_CUSTOM_SPAN_DAYS (366) and
+  // Data retention window (default 3 years) — bounds how far back the picker
+  // lets you go, instead of accepting any date up to MAX_CUSTOM_SPAN_DAYS and
   // only telling you afterward, via CoverageBanner, that most of it is empty.
   const retentionDays = useRetention();
   const minDay = earliestAvailableDay(today, retentionDays);
@@ -216,6 +216,23 @@ function RangeFilter({ ranges, range, onRangeChange, customRange, onCustomRangeA
 
         {customOpen && (
           <div className="obs-range-custom-panel">
+            {/* Shortcuts apply immediately — the common case is "show me the
+                last year", not picking two exact days. */}
+            <div className="obs-section-label">{t('topbar.quickLabel')}</div>
+            <div className="obs-range-quick">
+              {QUICK_RANGES.map(q => {
+                const dates = quickRangeDates(q.months, today, minDay);
+                const active = range === 'custom' && customRange?.start === dates.start && customRange?.end === dates.end;
+                return (
+                  <button
+                    key={q.key}
+                    type="button"
+                    className={`obs-range-btn${active ? ' active' : ''}`}
+                    onClick={() => { onCustomRangeApply(dates); setCustomOpen(false); }}
+                  >{t(q.i18n)}</button>
+                );
+              })}
+            </div>
             <div className="obs-field">
               <label htmlFor="range-from">{t('topbar.rangeFrom')}</label>
               <input

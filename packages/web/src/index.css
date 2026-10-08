@@ -513,6 +513,20 @@ body {
 
 .obs-range-wrap { position: relative; }
 
+.obs-range-quick {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+.obs-range-quick .obs-range-btn,
+.obs-range-quick .obs-range-btn + .obs-range-btn {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+/* "All history" spans the full row so the 5 shortcuts don't leave a hole. */
+.obs-range-quick .obs-range-btn:last-child { grid-column: 1 / -1; }
+
 .obs-range-custom-panel {
   position: absolute;
   top: calc(100% + 8px);

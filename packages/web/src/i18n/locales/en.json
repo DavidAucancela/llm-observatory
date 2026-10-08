@@ -41,9 +41,15 @@
     "rangeErrInvalid": "Enter valid dates",
     "rangeErrOrder": "Start must be on or before end",
     "rangeErrFuture": "Dates can't be in the future",
-    "rangeErrTooLong": "Range too long (max 366 days)",
+    "rangeErrTooLong": "Range too long (max 5 years)",
     "rangeErrRetention": "That start date is older than the {{days}}-day data retention window",
-    "rangeRetentionHint": "Data available from {{date}}"
+    "rangeRetentionHint": "Data available from {{date}}",
+    "quickLabel": "Quick ranges",
+    "quick3m": "3 months",
+    "quick6m": "6 months",
+    "quick1y": "1 year",
+    "quick2y": "2 years",
+    "quickAll": "All history"
   },
   "common": {
     "save": "Save",

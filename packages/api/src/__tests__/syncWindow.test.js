@@ -79,11 +79,11 @@ describe('resolveSyncWindow — start/end range', () => {
 describe('retentionDays', () => {
   const saved = process.env.DATA_RETENTION_DAYS;
   afterEach(() => { if (saved === undefined) delete process.env.DATA_RETENTION_DAYS; else process.env.DATA_RETENTION_DAYS = saved; });
-  it('defaults to 90 and survives a garbage value (was NaN → purge silently a no-op)', () => {
+  it('defaults to 3 years and survives a garbage value (was NaN → purge silently a no-op)', () => {
     delete process.env.DATA_RETENTION_DAYS;
-    expect(retentionDays()).toBe(90);
+    expect(retentionDays()).toBe(1095);
     process.env.DATA_RETENTION_DAYS = 'lots';
-    expect(retentionDays()).toBe(90);
+    expect(retentionDays()).toBe(1095);
     process.env.DATA_RETENTION_DAYS = '30';
     expect(retentionDays()).toBe(30);
     process.env.DATA_RETENTION_DAYS = '0';

@@ -5,10 +5,24 @@ const RANGE_MAP  = { '24h': '24 hours', '7d': '7 days', '30d': '30 days', '60d':
 const DOUBLE_MAP = { '24h': '48 hours', '7d': '14 days', '30d': '60 days', '60d': '120 days', '90d': '180 days' };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-// Longest custom window a single request may ask for. Data retention is 90d by
-// default, so this is generous; it only exists so /export can't be pointed at
-// an unbounded span.
-const MAX_CUSTOM_SPAN_DAYS = 366;
+// Longest custom window a single request may ask for (~5 years). Covers the
+// default 3-year retention with room for orgs that configure more; it only
+// exists so /export can't be pointed at an unbounded span. Long windows stay
+// cheap on /summary because the chart switches to weekly/monthly buckets
+// (bucketUnitFor below).
+const MAX_CUSTOM_SPAN_DAYS = 1830;
+
+// Chart bucket size for a window: hourly for a day or less, daily up to ~4
+// months, weekly up to 2 years, monthly beyond — a 2-year window at daily
+// granularity would be 730 unreadable points (and 730 × models rows).
+function bucketUnitFor(dr) {
+  if (!dr.custom) return dr.range === '24h' ? 'hour' : 'day';
+  const days = dr.spanMs / DAY_MS;
+  if (days <= 1)   return 'hour';
+  if (days <= 120) return 'day';
+  if (days <= 730) return 'week';
+  return 'month';
+}
 
 function getRangeIntervals(range) {
   return {
@@ -141,6 +155,6 @@ function appendTimeWindow(params, dr, column = 'timestamp') {
 }
 
 module.exports = {
-  getRangeIntervals, parseRange, rangeMiddleware, appendTimeWindow,
+  getRangeIntervals, parseRange, bucketUnitFor, rangeMiddleware, appendTimeWindow,
   RangeParamError, DAY_MS, MAX_CUSTOM_SPAN_DAYS,
 };

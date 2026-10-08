@@ -2,7 +2,7 @@ const express = require('express');
 const { z } = require('zod');
 const pool = require('../db/pool');
 const { deliverWebhooks } = require('../services/webhooks');
-const { rangeMiddleware, appendTimeWindow, DAY_MS } = require('../utils/dateRange');
+const { rangeMiddleware, appendTimeWindow, bucketUnitFor } = require('../utils/dateRange');
 const { isKnownModel, splitRecordedCost } = require('../services/pricingBridge');
 const { PROVIDERS } = require('../constants/providers');
 const { computeCoverage } = require('../services/coverage');
@@ -263,9 +263,6 @@ router.get('/summary', async (req, res) => {
     const dr = req.dateRange;
     const { interval, dblInterval, start: startDate, end: endDate } = dr;
     const isCustomRange = dr.custom;
-    // Daily buckets for ranges ≥ 7d so the chart differentiates days (not just hours);
-    // hourly buckets for 24h and for a custom window of one day or less.
-    const useDays   = isCustomRange ? dr.spanMs > DAY_MS : dr.range !== '24h';
     // Previous period of a custom window: the same length, ending right where this
     // one starts — [prevStart, start), exclusive at the top so a row exactly at
     // `start` is never counted in both periods.
@@ -310,7 +307,9 @@ router.get('/summary', async (req, res) => {
     // hours/days that had activity) — otherwise a burst of requests landing inside a
     // single bucket collapses time_series to one row and the chart falsely reports
     // "not enough data" even though total_requests is well above zero.
-    const bucketUnit = useDays ? 'day' : 'hour';
+    // hour / day / week / month — see bucketUnitFor (long custom windows get
+    // coarser buckets so a multi-year range stays readable).
+    const bucketUnit = bucketUnitFor(dr);
     const tsParams = [orgId];
     let tsSeriesStart, tsSeriesEnd;
     let tsJoinFilter = `ac.org_id = $1`;
@@ -490,6 +489,7 @@ router.get('/summary', async (req, res) => {
       error_breakdown:    errorBreakdown.rows,
       all_models:         allModels.rows,
       prev_time_series:   prevTimeSeries.rows,
+      bucket_unit:        bucketUnit,
     });
   } catch (err) {
     console.error('GET /api/metrics/summary error:', err);

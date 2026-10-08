@@ -41,9 +41,15 @@
     "rangeErrInvalid": "Ingresa fechas válidas",
     "rangeErrOrder": "El inicio debe ser anterior o igual al fin",
     "rangeErrFuture": "Las fechas no pueden ser futuras",
-    "rangeErrTooLong": "Rango demasiado largo (máx. 366 días)",
+    "rangeErrTooLong": "Rango demasiado largo (máx. 5 años)",
     "rangeErrRetention": "Esa fecha de inicio es anterior a la ventana de retención de datos ({{days}} días)",
-    "rangeRetentionHint": "Datos disponibles desde {{date}}"
+    "rangeRetentionHint": "Datos disponibles desde {{date}}",
+    "quickLabel": "Rangos rápidos",
+    "quick3m": "3 meses",
+    "quick6m": "6 meses",
+    "quick1y": "1 año",
+    "quick2y": "2 años",
+    "quickAll": "Todo el historial"
   },
   "common": {
     "save": "Guardar",

@@ -72,7 +72,7 @@ describe('POST /api/sync/:provider — window', () => {
     const { orgId, jwt } = await createOrg('Clamp Org');
     await addAdminKey(orgId);
     SYNC_PROVIDERS.anthropic.fetchBuckets = async (c, s, e) => ({ buckets: [], startISO: s.toISOString(), endISO: e.toISOString() });
-    const res = await post(jwt, '?days=400');
+    const res = await post(jwt, '?days=1200');
     expect(res.status).toBe(200);
     expect(res.body.clamped).toBe(true);
     expect(res.body.warning).toMatch(/retention/);
