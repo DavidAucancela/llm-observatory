@@ -11,7 +11,21 @@ export const RANGE_LABEL_I18N_KEYS = { '24h': 'topbar.range24h', '7d': 'topbar.r
 
 // Longest custom window the API accepts (MAX_CUSTOM_SPAN_DAYS in
 // packages/api/src/utils/dateRange.js) — keep in sync.
-export const MAX_CUSTOM_SPAN_DAYS = 366;
+export const MAX_CUSTOM_SPAN_DAYS = 1830;
+
+// Default DATA_RETENTION_DAYS on the API (DEFAULT_RETENTION_DAYS in
+// packages/api/src/utils/retention.js) — used until useRetention() resolves.
+export const DEFAULT_RETENTION_DAYS = 1095;
+
+// One-click shortcuts in the custom-range popover, for looking far back
+// without typing dates. `months: null` = everything still inside retention.
+export const QUICK_RANGES = [
+  { key: '3m',  months: 3,    i18n: 'topbar.quick3m' },
+  { key: '6m',  months: 6,    i18n: 'topbar.quick6m' },
+  { key: '1y',  months: 12,   i18n: 'topbar.quick1y' },
+  { key: '2y',  months: 24,   i18n: 'topbar.quick2y' },
+  { key: 'all', months: null, i18n: 'topbar.quickAll' },
+];
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -36,9 +50,9 @@ export function todayUtc() {
 /**
  * Earliest day (YYYY-MM-DD, UTC) still inside the retention window — the day
  * after this one is the oldest the API hasn't purged yet. `retentionDays` is
- * the org-wide `DATA_RETENTION_DAYS` (default 90, see useRetention()).
+ * the org-wide `DATA_RETENTION_DAYS` (default 1095, see useRetention()).
  */
-export function earliestAvailableDay(today = todayUtc(), retentionDays = 90) {
+export function earliestAvailableDay(today = todayUtc(), retentionDays = DEFAULT_RETENTION_DAYS) {
   const base = Date.parse(`${today}T00:00:00Z`);
   // Every real caller passes a `today` from todayUtc() itself, so this is
   // unreachable today — but `new Date(NaN).toISOString()` throws a
@@ -48,6 +62,25 @@ export function earliestAvailableDay(today = todayUtc(), retentionDays = 90) {
   if (!Number.isFinite(base)) return today;
   const ms = base - (retentionDays - 1) * DAY_MS;
   return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * {start, end} (YYYY-MM-DD, UTC) for a QUICK_RANGES entry: `months` calendar
+ * months back from `today` (same day of month, clamped for short months), or
+ * from `minDay` for 'all'. Never starts before `minDay`, so a shortcut can't
+ * produce a range the retention check would then reject.
+ */
+export function quickRangeDates(months, today = todayUtc(), minDay = earliestAvailableDay(today)) {
+  let start = minDay;
+  if (months != null) {
+    const [y, m, d] = today.split('-').map(Number);
+    const target = new Date(Date.UTC(y, m - 1 - months, 1));
+    const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+    target.setUTCDate(Math.min(d, lastDay));
+    start = target.toISOString().slice(0, 10);
+    if (start < minDay) start = minDay;
+  }
+  return { start, end: today };
 }
 
 /**

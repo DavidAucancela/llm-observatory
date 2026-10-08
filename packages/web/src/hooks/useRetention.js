@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useApi } from './useApi';
+import { DEFAULT_RETENTION_DAYS } from '../utils/dateRange';
 
-// Data retention window (DATA_RETENTION_DAYS on the API, default 90) — the
+// Data retention window (DATA_RETENTION_DAYS on the API, default 1095) — the
 // nightly purge deletes api_calls older than this, so it's also the earliest
 // day the date-range picker can usefully show. There's no dedicated endpoint
 // for it: GET /api/metrics/coverage already computes it (services/coverage.js)
@@ -10,7 +11,7 @@ import { useApi } from './useApi';
 // as useProviders.
 let cache = null;
 let inflight = null;
-const FALLBACK_DAYS = 90; // matches retentionDays()'s own default in the API
+const FALLBACK_DAYS = DEFAULT_RETENTION_DAYS; // matches retentionDays()'s own default in the API
 
 export function useRetention() {
   const { apiFetch } = useApi();

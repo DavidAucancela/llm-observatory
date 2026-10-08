@@ -57,7 +57,7 @@ describe('custom range — validation returns 400, not 500', () => {
     ['datetime without zone',    'start=2026-07-15T00:00:00&end=2026-07-16'],
     ['custom without dates',     'range=custom'],
     ['unknown preset',           'range=bogus'],
-    ['span too long',            'start=2024-01-01&end=2026-07-15'],
+    ['span too long',            'start=2019-01-01&end=2026-07-15'],
   ];
   const endpoints = [
     '/api/metrics', '/api/metrics/summary', '/api/metrics/export',
@@ -93,6 +93,26 @@ describe('GET /api/metrics/summary — custom range buckets and previous period'
     expect(buckets).toEqual([
       '2026-07-13T00:00:00.000Z', '2026-07-14T00:00:00.000Z', '2026-07-15T00:00:00.000Z',
     ]);
+  });
+
+  it('a multi-year custom range is bucketed weekly/monthly, not 700+ daily points', async () => {
+    const { orgId, jwt } = await createOrg('Long Range Org');
+    await insertCall(orgId, '2024-03-10T12:00:00Z', { cost: 2 });
+    await insertCall(orgId, '2026-07-15T12:00:00Z', { cost: 3 });
+
+    const year = await get(jwt, '/api/metrics/summary?start=2025-07-16&end=2026-07-15');
+    expect(year.status).toBe(200);
+    expect(year.body.bucket_unit).toBe('week');
+
+    const multi = await get(jwt, '/api/metrics/summary?start=2023-08-01&end=2026-07-31');
+    expect(multi.status).toBe(200);
+    expect(multi.body.bucket_unit).toBe('month');
+    const buckets = [...new Set(multi.body.time_series.map(r => r.hour))].sort();
+    expect(buckets).toHaveLength(36);
+    expect(buckets[0]).toBe('2023-08-01T00:00:00.000Z');
+    expect(parseFloat(multi.body.summary.total_cost_usd)).toBeCloseTo(5);
+    const march = multi.body.time_series.filter(r => r.hour === '2024-03-01T00:00:00.000Z');
+    expect(march.reduce((n, r) => n + parseInt(r.requests || 0), 0)).toBe(1);
   });
 
   it('a row exactly at start counts in the current period only, never in both', async () => {

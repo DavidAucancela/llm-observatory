@@ -285,7 +285,7 @@ Configure via `express-rate-limit` in `packages/api/src/index.js`.
 
 ### Data retention
 
-- Default: **90 days** (records auto-deleted daily at 02:00 UTC)
+- Default: **1095 days / 3 years** (older records auto-deleted daily at 02:00 UTC) — the date filter can look back that far without re-syncing
 - Override: set `DATA_RETENTION_DAYS=<n>` in your `.env` (minimum 1)
 
 ### JWT expiry

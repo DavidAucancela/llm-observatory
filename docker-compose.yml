@@ -38,7 +38,7 @@ services:
       # Alerts (optional)
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       # Data retention in days (default 90)
-      DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-90}
+      DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-1095}
       # Legacy single-admin bootstrap (optional — prefer self-registration)
       AUTH_EMAIL: ${AUTH_EMAIL:-}
       AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:-}

@@ -625,9 +625,13 @@ function MetricSurface3D({
   // dense, shrinking bars and flattening the camera even with a single real
   // data point. Computed first since zoomFactor/minCameraDistance below now
   // derive from it too (see densityFraming).
-  const spanDays = grid.hours.length > 1
-    ? (new Date(grid.hours[grid.hours.length - 1]) - new Date(grid.hours[0])) / 86_400_000
-    : 0;
+  // Long custom ranges come back in weekly/monthly buckets (bucket_unit), so
+  // once a bucket is a day or wider, density is the bucket count itself — 36
+  // monthly bars must frame like ~36 daily bars, not like 3 years of them.
+  const firstMs = grid.hours.length > 1 ? new Date(grid.hours[0]).getTime() : 0;
+  const lastMs  = grid.hours.length > 1 ? new Date(grid.hours[grid.hours.length - 1]).getTime() : 0;
+  const stepDays = grid.hours.length > 1 ? (new Date(grid.hours[1]).getTime() - firstMs) / 86_400_000 : 0;
+  const spanDays = stepDays >= 1 ? grid.hours.length - 1 : (lastMs - firstMs) / 86_400_000;
   const { zoom: zoomFactor, minDist: minCameraDistance } = densityFraming(spanDays);
   const cameraDistance = (gridSpan * 1.4 + 5) * zoomFactor;
   const isDense = spanDays > DENSE_THRESHOLD;
