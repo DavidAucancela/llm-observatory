@@ -21,17 +21,23 @@
 //                 Only xAI needs this today: its Management API routes are
 //                 /v1/billing/teams/{teamId}/… and the teamId is not
 //                 discoverable through the API — it is copied from the console.
+//   syncLookbackDays — how far back the provider's usage API will answer, when
+//                 it's shorter than our own retention. OpenAI's usage/costs
+//                 endpoints 400 with `reporting_lookback_exceeded` for any
+//                 start older than one year, failing the whole sync; the sync
+//                 window is trimmed to this instead (services/syncWindow.js).
+//                 null = no known limit.
 
 const PROVIDER_CAPS = {
-  anthropic: { adminKey: true,  sync: true,  reconcile: true,  liveBalance: false, accountId: 'none' },
-  openai:    { adminKey: true,  sync: true,  reconcile: true,  liveBalance: false, accountId: 'none' },
-  gemini:    { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none' },
-  grok:      { adminKey: true,  sync: true,  reconcile: true,  liveBalance: true,  accountId: 'required' },
-  kimi:      { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none' },
+  anthropic: { adminKey: true,  sync: true,  reconcile: true,  liveBalance: false, accountId: 'none', syncLookbackDays: null },
+  openai:    { adminKey: true,  sync: true,  reconcile: true,  liveBalance: false, accountId: 'none', syncLookbackDays: 365 },
+  gemini:    { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none', syncLookbackDays: null },
+  grok:      { adminKey: true,  sync: true,  reconcile: true,  liveBalance: true,  accountId: 'required', syncLookbackDays: null },
+  kimi:      { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none', syncLookbackDays: null },
   // DeepInfra's only billing endpoint is per-request (POST /v1/request-costs by
   // request id); there is no org-level usage/cost listing to sync or reconcile
   // against, so like Kimi it is SDK-metrics only.
-  deepinfra: { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none' },
+  deepinfra: { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none', syncLookbackDays: null },
 };
 
 // Ordered: anthropic and openai first because every "which provider?" dropdown

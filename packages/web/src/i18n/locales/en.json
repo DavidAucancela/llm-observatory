@@ -517,7 +517,8 @@
       "covers": "covers",
       "lastAttempt": "Last attempt",
       "invalidRange": "Pick a valid range (start on or before end, not in the future).",
-      "emptyFetch": "Nothing returned"
+      "emptyFetch": "Nothing returned",
+      "providerLookback": "This provider only reports usage for the last {{days}} days — older dates are skipped."
     },
     "alerts": {
       "newRule": "+ New rule",

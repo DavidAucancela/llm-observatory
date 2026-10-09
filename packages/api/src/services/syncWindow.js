@@ -16,7 +16,14 @@ const DEFAULT_SYNC_DAYS = 30;
 //  - The end is capped at `now` (a future end has no usage to fetch).
 //  - Days older than the retention window are dropped (with a warning) rather
 //    than imported and purged at 02:00; a window entirely older is a 400.
-function resolveSyncWindow({ start, end, days } = {}, { now = Date.now(), retention = retentionDays() } = {}) {
+//  - `lookbackDays` (the provider's own history limit, PROVIDER_CAPS
+//    .syncLookbackDays) trims the same way: OpenAI rejects the WHOLE request
+//    when the start is more than a year back, so asking for 13 months used to
+//    import nothing at all.
+function resolveSyncWindow(
+  { start, end, days } = {},
+  { now = Date.now(), retention = retentionDays(), lookbackDays = null, providerLabel = 'This provider' } = {},
+) {
   let startMs, endMs;
 
   const hasStart = start !== undefined && start !== '';
@@ -46,6 +53,22 @@ function resolveSyncWindow({ start, end, days } = {}, { now = Date.now(), retent
     startMs = cutoff;
     clamped = true;
     warning = `Start moved to ${new Date(cutoff).toISOString().slice(0, 10)}: data older than the ${retention}-day retention window is deleted nightly`;
+  }
+
+
+  if (lookbackDays != null) {
+    // Day-aligned: OpenAI reports its limit as a UTC date ("Earliest supported
+    // start date: 2025-10-09"), i.e. today's UTC midnight minus the lookback.
+    // A calendar year is never shorter than 365 days, so this never undershoots.
+    const providerCutoff = floorUtcDay(now) - lookbackDays * DAY_MS;
+    if (endMs < providerCutoff) {
+      throw new RangeParamError(`${providerLabel} only reports usage for the last ${lookbackDays} days, so that range can't be synced`);
+    }
+    if (startMs < providerCutoff) {
+      startMs = providerCutoff;
+      clamped = true;
+      warning = `Start moved to ${new Date(providerCutoff).toISOString().slice(0, 10)}: ${providerLabel} only reports usage for the last ${lookbackDays} days`;
+    }
   }
 
   return { startDate: new Date(startMs), endDate: new Date(endMs), clamped, warning };

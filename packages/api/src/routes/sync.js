@@ -5,7 +5,7 @@ const { requireAdmin } = require('../middleware/auth');
 const { anthropicCacheCreationTokens } = require('../services/providerUsage');
 const { costForProviderUsage } = require('../services/pricingBridge');
 const { SYNC_PROVIDERS, syncableProviders } = require('../services/providerRegistry');
-const { requiresAccountId, ADMIN_KEY_HELP, PROVIDER_LABELS } = require('../constants/providers');
+const { requiresAccountId, ADMIN_KEY_HELP, PROVIDER_LABELS, PROVIDER_CAPS } = require('../constants/providers');
 const { resolveSyncWindow } = require('../services/syncWindow');
 const { RangeParamError } = require('../utils/dateRange');
 
@@ -208,7 +208,10 @@ router.post('/:provider', requireAdmin, async (req, res, next) => {
 
     let window;
     try {
-      window = resolveSyncWindow({ ...req.query, ...(req.body || {}) });
+      window = resolveSyncWindow({ ...req.query, ...(req.body || {}) }, {
+        lookbackDays: PROVIDER_CAPS[provider]?.syncLookbackDays ?? null,
+        providerLabel: PROVIDER_LABELS[provider] || provider,
+      });
     } catch (err) {
       if (err instanceof RangeParamError) return res.status(400).json({ error: err.message });
       throw err;

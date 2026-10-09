@@ -25,6 +25,7 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
   const prefilled = isValidDateOnly(qStart) && isValidDateOnly(qEnd);
 
   const [providers, setProviders] = useState([]);           // sync-capable, from GET /api/providers
+  const [lookback, setLookback]   = useState({});           // provider → syncLookbackDays (provider's own history limit)
   const retentionDays = useRetention();
   const [logs, setLogs]         = useState([]);
   const [syncing, setSyncing]   = useState({});
@@ -43,7 +44,11 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
   useEffect(() => {
     fetchLogs();
     apiFetch('/api/providers').then(r => r.json())
-      .then(d => setProviders((d.providers || []).filter(p => p.sync).map(p => p.id)))
+      .then(d => {
+        const syncable = (d.providers || []).filter(p => p.sync);
+        setProviders(syncable.map(p => p.id));
+        setLookback(Object.fromEntries(syncable.filter(p => p.syncLookbackDays).map(p => [p.id, p.syncLookbackDays])));
+      })
       .catch(() => {});
   }, []);
 
@@ -151,6 +156,11 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
                     {covers(success) && <> · {t('settings.sync.covers')} <span style={{ color: 'var(--text)' }}>{covers(success)}</span></>}
                   </>
                 ) : t('settings.sync.neverSynced')}
+                {/* The provider's own history limit (OpenAI: 1 year) — a longer
+                    range is trimmed server-side, so say it up front. */}
+                {lookback[p] && (
+                  <div style={{ marginTop: 2 }}>{t('settings.sync.providerLookback', { days: lookback[p] })}</div>
+                )}
                 {failedSince && (
                   <div style={{ color: 'var(--error)', marginTop: 2 }}>
                     {t('settings.sync.lastAttempt')}: {fmtDateTime(latest.started_at)} — {latest.error_message || 'error'}

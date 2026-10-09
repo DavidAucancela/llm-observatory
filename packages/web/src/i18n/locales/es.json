@@ -517,7 +517,8 @@
       "covers": "cubre",
       "lastAttempt": "Último intento",
       "invalidRange": "Elige un rango válido (inicio igual o anterior al fin, sin fechas futuras).",
-      "emptyFetch": "Sin datos"
+      "emptyFetch": "Sin datos",
+      "providerLookback": "Este proveedor solo reporta el uso de los últimos {{days}} días; las fechas anteriores se omiten."
     },
     "alerts": {
       "newRule": "+ Nueva regla",
