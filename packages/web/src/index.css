@@ -524,6 +524,9 @@ body {
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+.obs-range-quick .obs-range-btn:disabled { opacity: 0.4; cursor: not-allowed; background: transparent; color: var(--muted); }
+.obs-range-sync-link { font-size: 11px; color: var(--accent); text-decoration: none; }
+.obs-range-sync-link:hover { text-decoration: underline; }
 /* "All history" spans the full row so the 5 shortcuts don't leave a hole. */
 .obs-range-quick .obs-range-btn:last-child { grid-column: 1 / -1; }
 
@@ -930,13 +933,7 @@ body {
   padding: 0 10px;
 }
 
-.dash-chart-rail-actions { display: flex; align-items: center; gap: 6px; }
-.dash-chart-rail-refresh {
-  flex: 1;
-  justify-content: center;
-  height: var(--rail-ctrl-h);
-  padding: 0 10px;
-}
+.dash-chart-rail-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 
 .dash-chart-rail-hint-btn {
   flex-shrink: 0;
@@ -2597,3 +2594,76 @@ body {
 .obs-coverage-text span { color: var(--muted); }
 .obs-coverage-note { color: var(--muted); font-size: 11px; }
 @media (max-width: 720px) { .obs-coverage { margin: 10px 16px 0; } }
+
+/* ── Sync page (pages/Sync.jsx) — the single module for provider data:
+   auto-sync status, per-provider state, history import and run log. ── */
+.sync-page { padding-top: 0; }
+.sync-sub { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.sync-link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-size: 11px; color: var(--accent); text-decoration: none; font-family: inherit;
+}
+.sync-link:hover { text-decoration: underline; }
+
+.sync-auto {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 16px 0; border-bottom: 1px solid var(--border-soft);
+}
+.sync-auto-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+
+.sync-results { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+.sync-msg { font-size: 12px; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border-soft); }
+.sync-msg--ok    { color: var(--success); border-color: color-mix(in oklab, var(--success) 30%, var(--border)); }
+.sync-msg--warn  { color: var(--warning); border-color: color-mix(in oklab, var(--warning) 30%, var(--border)); }
+.sync-msg--error { color: var(--error);   border-color: color-mix(in oklab, var(--error) 30%, var(--border)); }
+
+.sync-row {
+  display: grid; grid-template-columns: 130px 1fr 260px; gap: 16px; align-items: start;
+  padding: 14px 0; border-bottom: 1px solid var(--border-soft); font-size: 12px; color: var(--muted);
+}
+.sync-row-status, .sync-row-data { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sync-row-data { font-size: 11px; }
+
+.sync-import { margin-top: 28px; display: flex; flex-direction: column; gap: 12px; }
+.sync-import-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.sync-import-dates { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.sync-import-dates .obs-input { height: 30px; }
+.sync-plan { display: flex; flex-direction: column; border: 1px solid var(--border-soft); border-radius: 8px; }
+.sync-plan-row {
+  display: grid; grid-template-columns: 18px 110px 1fr; gap: 10px; align-items: center;
+  padding: 9px 12px; font-size: 12px; color: var(--muted); cursor: pointer;
+}
+.sync-plan-row + .sync-plan-row { border-top: 1px solid var(--border-soft); }
+.sync-plan-row.is-blocked { cursor: not-allowed; opacity: 0.75; }
+.sync-plan-text { min-width: 0; }
+
+.sync-log-row {
+  display: grid; grid-template-columns: 10px 100px 64px 1fr 130px; gap: 10px; align-items: start;
+  padding: 8px 0; font-size: 12px; border-bottom: 1px solid var(--border-soft);
+}
+.sync-log-row .dot { margin-top: 5px; }
+.sync-log-text { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; min-width: 0; }
+.sync-log-range { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+.sync-log-raw {
+  flex-basis: 100%; font-family: var(--font-mono); font-size: 10px; color: var(--muted);
+  background: var(--hover); padding: 6px 8px; border-radius: 4px; white-space: pre-wrap; word-break: break-word;
+}
+.sync-log-time { font-family: var(--font-mono); font-size: 11px; color: var(--muted); text-align: right; }
+
+.sync-danger { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid color-mix(in oklab, var(--error) 25%, var(--border)); border-radius: 8px; }
+.sync-danger-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sync-danger-row .obs-btn { margin-left: auto; }
+.sync-progress { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; vertical-align: middle; }
+.sync-progress .iprog-bar { width: 90px; }
+.sync-progress-pct { font-size: 10.5px; font-variant-numeric: tabular-nums; color: var(--accent); }
+.sync-modal-overlay { align-items: flex-start; }
+.sync-modal { width: 100%; max-width: 420px; margin: 0 16px; padding: 18px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid color-mix(in oklab, var(--error) 30%, var(--border)); border-radius: 12px; box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.5); }
+.sync-modal-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.sync-modal .sync-sub { margin: 0; }
+.sync-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+@media (max-width: 767px) {
+  .sync-log-time { text-align: left; }
+  .sync-plan-row { grid-template-columns: 18px 1fr; }
+  .sync-plan-row .sync-plan-text { grid-column: 1 / -1; }
+}

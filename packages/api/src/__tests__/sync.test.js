@@ -1,4 +1,4 @@
-const { importBuckets } = require('../routes/sync');
+const { importBuckets } = require('../services/syncImport');
 const { costForProviderUsage } = require('../services/pricingBridge');
 const { resetDb, createOrg, pool } = require('./helpers');
 

@@ -8,10 +8,11 @@ const fmtDay = (iso, lang) =>
   new Date(iso).toLocaleDateString(lang === 'es' ? 'es-ES' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
 /**
- * Tells the user when the date range they picked may show incomplete numbers
- * (before the first record, older than the retention window, or past the last
- * provider sync) and, for admins, links to the Sync page with that range
- * pre-filled. It never hides data and never triggers a sync itself — syncing
+ * Tells the user when the CUSTOM date range they picked reaches before the
+ * first record or past the retention window and, for admins, links to the Sync
+ * page with the missing span pre-filled. Presets never trigger it, and recent
+ * days are kept current by the server's auto-sync, so it no longer asks for a
+ * sync on every visit. It never hides data and never triggers a sync itself — syncing
  * calls the provider's admin API and lives only on the Sync page.
  *
  * `rangeParams` is buildRangeParams(...) output; the assessment is computed
@@ -43,13 +44,6 @@ export default function CoverageBanner({ rangeParams }) {
   }
   if (cov.beyond_retention) {
     lines.push(t('coverage.beyondRetention', { days: cov.retention_days }));
-  }
-  for (const g of cov.sync_gaps || []) {
-    lines.push(t('coverage.syncGap', {
-      provider: g.provider,
-      from: fmtDay(g.synced_from, lang),
-      to: fmtDay(g.synced_to, lang),
-    }));
   }
 
   const suggested = cov.suggested_sync;

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ProviderBadge from '../components/ProviderBadge';
 import TopBar from '../components/TopBar';
@@ -184,7 +185,7 @@ function AddKeyForm({ onSaved, onCancel }) {
       }
       const res = await apiFetch('/api/credentials', { method: 'POST', body: JSON.stringify(payload) });
       const d = await res.json();
-      if (res.ok) { onSaved(d.data); }
+      if (res.ok) { onSaved(d.data, d.sync_id ?? null); }
       else { setError(Array.isArray(d.error) ? d.error.map(e => e.message).join(', ') : (d.error || 'Error saving')); }
     } catch { setError('Connection error'); } finally { setSaving(false); }
   };
@@ -371,6 +372,9 @@ export default function Keys({ darkMode, onToggleDarkMode }) {
   const [credentials, setCredentials] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [importStarted, setImportStarted] = useState(null); // provider whose first history import just started
+  const { providers } = useProviders();
+  const providerLabel = (id) => providers.find(p => p.id === id)?.label || id;
 
   const fetchCredentials = async () => {
     try {
@@ -385,7 +389,11 @@ export default function Keys({ darkMode, onToggleDarkMode }) {
   const handleDeleted = (id) => setCredentials(cs => cs.filter(c => c.id !== id));
   const handleTested  = (id, isValid) => setCredentials(cs => cs.map(c => c.id === id ? { ...c, is_valid: isValid, last_tested_at: new Date().toISOString() } : c));
   const handleUpdated = (id, updated) => setCredentials(cs => cs.map(c => c.id === id ? updated : c));
-  const handleSaved   = (cred) => { setCredentials(cs => [cred, ...cs]); setShowForm(false); };
+  const handleSaved   = (cred, syncId) => {
+    setCredentials(cs => [cred, ...cs]); setShowForm(false);
+    // POST /api/credentials starts the first import for a new admin key.
+    setImportStarted(syncId ? cred.provider : null);
+  };
 
   const sdkKeys   = credentials.filter(c => c.key_type === 'sdk');
   const adminKeys = credentials.filter(c => c.key_type === 'admin');
@@ -401,6 +409,12 @@ export default function Keys({ darkMode, onToggleDarkMode }) {
         </div>
 
         {showForm && <AddKeyForm onSaved={handleSaved} onCancel={() => setShowForm(false)} />}
+        {importStarted && (
+          <div className="sync-msg sync-msg--ok" role="status" style={{ margin: '8px 0' }}>
+            {t('settings.keys.importStarted', { provider: providerLabel(importStarted) })}{' '}
+            <Link to="/sync" className="sync-link">{t('settings.keys.importStartedLink')}</Link>
+          </div>
+        )}
 
         {loading ? (
           <div className="obs-skeleton" style={{ height: 40, borderRadius: 4 }} />

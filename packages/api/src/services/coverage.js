@@ -16,43 +16,31 @@ function resolveWindow(dr, now, firstDataMs) {
 }
 
 // Pure decision logic (no DB) so it can be tested with plain numbers.
-//   providers: [{ provider, syncable, hasAdminKey, sync: { fromMs, toMs } | null }]
-// "Coverage" here answers one question for the date filter: for the window the
-// user picked, is there a reason the numbers might be incomplete, and can a
-// provider sync fill it? It never hides data — partial data is still shown.
+//   providers: [{ provider, syncable, hasAdminKey }]
+// "Coverage" answers one question for the date filter: for the window the user
+// DELIBERATELY picked (a custom range), is part of it outside the data we have,
+// and can a sync fill it? It never hides data — partial data is still shown.
+//
+// Presets never raise it. It used to also flag every window ending after a
+// provider's last sync ("sync gaps") — with syncing manual-only that was true
+// of every window ending today, so the banner asked for a sync on every visit.
+// Keeping recent days current is now the auto-sync's job (syncRunner.js).
 function assessCoverage({ windowStartMs, windowEndMs, now, retention, firstDataMs, lastDataMs, providers, isCustom = false }) {
   const cutoff = retentionCutoffMs(now, retention);
   const hasData = firstDataMs != null;
 
   const beforeFirstData = hasData && windowStartMs < floorUtcDay(firstDataMs);
   // Compare against the raw retention edge, not the day-aligned `cutoff`: a
-  // rolling preset that spans exactly the retention (e.g. 90d with 90-day
-  // retention) starts at now-R, which is always a few hours before the next UTC
-  // midnight, and would be flagged on every load though nothing in it was purged.
-  // (`cutoff` still bounds what a sync can usefully import, below.)
+  // rolling preset that spans exactly the retention starts at now-R, which is
+  // always a few hours before the next UTC midnight, and would be flagged on
+  // every load though nothing in it was purged.
   const beyondRetention = windowStartMs < now - retention * DAY_MS;
 
   const syncable = providers.filter(p => p.syncable && p.hasAdminKey);
 
-  // A provider that HAS synced before but whose last sync doesn't reach the
-  // window. Providers that never synced are not flagged here: an org that only
-  // uses the SDK has no gap to fill, and nagging it would be noise (the
-  // before_first_data flag still covers "older than anything we have").
-  const syncGaps = syncable
-    .filter(p => p.sync)
-    .map(p => ({
-      provider: p.provider,
-      synced_from: iso(p.sync.fromMs),
-      synced_to: iso(p.sync.toMs),
-      missing_before: windowStartMs >= cutoff && windowStartMs < floorUtcDay(p.sync.fromMs),
-      missing_after: windowEndMs > p.sync.toMs + DAY_MS,
-    }))
-    .filter(g => g.missing_before || g.missing_after);
-
   const suggestStartMs = Math.max(windowStartMs, cutoff);
-  const suggestEndMs   = Math.min(windowEndMs, now);
-  const worthFilling   = (beforeFirstData && suggestStartMs < floorUtcDay(firstDataMs)) || syncGaps.length > 0;
-  const canSync        = syncable.length > 0 && suggestStartMs <= suggestEndMs && worthFilling;
+  const suggestEndMs   = hasData ? Math.min(windowEndMs, now, floorUtcDay(firstDataMs) - 1) : Math.min(windowEndMs, now);
+  const canSync = isCustom && beforeFirstData && syncable.length > 0 && suggestStartMs <= suggestEndMs;
 
   return {
     has_data: hasData,
@@ -63,21 +51,16 @@ function assessCoverage({ windowStartMs, windowEndMs, now, retention, firstDataM
     window: { start: iso(windowStartMs), end: iso(windowEndMs) },
     before_first_data: beforeFirstData,
     beyond_retention: beyondRetention,
-    sync_gaps: syncGaps,
     syncable_providers: syncable.map(p => p.provider),
     can_sync: canSync,
     suggested_sync: canSync ? { start: ymd(suggestStartMs), end: ymd(suggestEndMs) } : null,
-    // "Before the first record" alone is only worth a banner when it's a window
-    // the user deliberately picked, or when an admin key exists that could fill
-    // it. Otherwise every 7d/30d preset would nag an org that simply started
-    // sending data yesterday and has nothing older to sync.
-    needs_attention: (beforeFirstData && (isCustom || canSync)) || beyondRetention || syncGaps.length > 0,
+    needs_attention: isCustom && (beforeFirstData || beyondRetention),
   };
 }
 
 async function loadCoverageInputs(orgId) {
   const syncCapable = providersWith('sync');
-  const [rows, syncs, keys] = await Promise.all([
+  const [rows, keys] = await Promise.all([
     // Ping/judge rows are bookkeeping, not usage: they'd fake "data starts here".
     pool.query(
       `SELECT MIN(timestamp) AS first_at, MAX(timestamp) AS last_at
@@ -88,30 +71,15 @@ async function loadCoverageInputs(orgId) {
       [orgId]
     ),
     pool.query(
-      `SELECT DISTINCT ON (provider) provider, date_range_start, date_range_end
-       FROM sync_logs
-       WHERE org_id = $1 AND status = 'success' AND date_range_start IS NOT NULL AND date_range_end IS NOT NULL
-       ORDER BY provider, completed_at DESC`,
-      [orgId]
-    ),
-    pool.query(
       `SELECT DISTINCT provider FROM provider_credentials WHERE org_id = $1 AND key_type = 'admin'`,
       [orgId]
     ),
   ]);
-
-  const syncByProvider = Object.fromEntries(syncs.rows.map(r => [r.provider, {
-    fromMs: new Date(r.date_range_start).getTime(),
-    toMs:   new Date(r.date_range_end).getTime(),
-  }]));
   const adminKeys = new Set(keys.rows.map(r => r.provider));
-
   return {
     firstDataMs: rows.rows[0].first_at ? new Date(rows.rows[0].first_at).getTime() : null,
     lastDataMs:  rows.rows[0].last_at  ? new Date(rows.rows[0].last_at).getTime()  : null,
-    providers: syncCapable.map(p => ({
-      provider: p, syncable: true, hasAdminKey: adminKeys.has(p), sync: syncByProvider[p] || null,
-    })),
+    providers: syncCapable.map(p => ({ provider: p, syncable: true, hasAdminKey: adminKeys.has(p) })),
   };
 }
 

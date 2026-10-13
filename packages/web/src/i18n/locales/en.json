@@ -49,7 +49,12 @@
     "quick6m": "6 months",
     "quick1y": "1 year",
     "quick2y": "2 years",
-    "quickAll": "All history"
+    "quickAll": "All history",
+    "rangeErrBeforeData": "There's no data before {{date}} — that's when your records start",
+    "rangeErrNoData": "There's no data in that range — your records start on {{date}}",
+    "rangeNoDataYet": "No data yet — send requests with the SDK or import history from Sync",
+    "rangeImportOlder": "Need older history? Import it from Sync →",
+    "quickTooFar": "Your data starts on {{date}}"
   },
   "common": {
     "save": "Save",
@@ -114,7 +119,10 @@
     "budgetAlertMsg": "Spend alert — {{provider}} went over {{threshold}} (current: {{current}})",
     "deliveryFailed": "· failed to notify Discord",
     "reconciliationMsg": "{{provider}} reconciliation off by {{pct}}%",
-    "teamJoinedMsg": "{{email}} accepted the team invitation"
+    "teamJoinedMsg": "{{email}} accepted the team invitation",
+    "syncFailingMsg": "{{provider}} sync failed {{failures}} times in a row",
+    "syncFailingAuth": "{{provider}} is rejecting the admin key: sync failed {{failures}} times in a row",
+    "syncUnpricedMsg": "{{provider}}: usage of models with no price ({{models}}), that cost isn't counted"
   },
   "auth": {
     "brand": "Observatory",
@@ -263,7 +271,6 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "refresh": "Refresh",
     "tokensOverTime": "Tokens over time",
     "requestsOverTime": "Requests over time",
     "costOverTime": "Cost over time",
@@ -492,32 +499,9 @@
       "lastUsed": "Last used {{date}}",
       "neverUsed": "Never used",
       "createdDate": "Created {{date}}",
-      "revokedStatus": "Revoked"
-    },
-    "sync": {
-      "days7": "7 days",
-      "days30": "30 days",
-      "days60": "60 days",
-      "days90": "90 days",
-      "runButton": "Run",
-      "clearButton": "Clear data",
-      "logTitle": "Recent sync log",
-      "inProgress": "In progress…",
-      "completed": "Completed",
-      "lastSync": "Last sync",
-      "neverSynced": "Never synced",
-      "rangeLabel": "Date range",
-      "modeDays": "Last N days",
-      "modeRange": "Date range",
-      "from": "From",
-      "to": "To",
-      "retentionNote": "Data older than {{days}} days is deleted nightly, so older days can't be synced.",
-      "clamped": "Start moved to a later date: older data is deleted nightly.",
-      "lastSuccess": "Last successful sync",
-      "covers": "covers",
-      "lastAttempt": "Last attempt",
-      "invalidRange": "Pick a valid range (start on or before end, not in the future).",
-      "emptyFetch": "Nothing returned"
+      "revokedStatus": "Revoked",
+      "importStarted": "Importing all available {{provider}} history in the background.",
+      "importStartedLink": "See progress in Sync →"
     },
     "alerts": {
       "newRule": "+ New rule",
@@ -658,8 +642,113 @@
     "title": "This range may be incomplete",
     "beforeFirst": "Records start on {{date}}.",
     "beyondRetention": "Data older than {{days}} days is deleted nightly.",
-    "syncGap": "{{provider}}: last sync covers {{from}} – {{to}}.",
-    "syncRange": "Sync this range",
-    "askAdmin": "Ask an admin to sync this range."
+    "syncRange": "Import this history",
+    "askAdmin": "Ask an admin to import this history from Sync."
+  },
+  "sync": {
+    "loadError": "Couldn't load the sync status. Check your connection and reload the page.",
+    "auto": {
+      "on": "Automatic sync on · every {{hours}} h",
+      "off": "Automatic sync off",
+      "next": "Next run: {{when}}.",
+      "noProviders": "No provider has an admin key configured, so there's nothing to sync automatically.",
+      "explain": "Recent days update on their own; you only need this page to import older history. Data is kept for {{days}} days."
+    },
+    "refresh": {
+      "button": "Update now",
+      "started": "{{provider}}: updating {{from}} – {{to}}…",
+      "nothing": "No providers with an admin key to update."
+    },
+    "providers": {
+      "title": "Status by provider",
+      "dataSince": "Your data starts on {{date}}.",
+      "noData": "No data stored yet.",
+      "rows": "{{live}} from the SDK · {{imported}} imported",
+      "empty": "No data stored",
+      "limit": "History importable from {{date}}",
+      "limitProvider": "History importable from {{date}} (the provider only keeps {{days}} days)",
+      "expiring": "{{count}} records older than {{date}} will be deleted within {{within}} days ({{days}} days of history are kept)."
+    },
+    "status": {
+      "noKey": "No admin key: this provider's data only arrives through the SDK.",
+      "addKey": "Add an admin key in Keys →",
+      "fixKey": "Complete it in Keys →",
+      "running": "Syncing {{range}}…",
+      "failed": "Failed {{when}}",
+      "updated": "Updated {{when}}",
+      "covers": "covers {{range}}",
+      "never": "Never synced yet. The automatic sync will import all available history on its next run.",
+      "sdkOnly": "SDK only: this provider has no history API, so its data only arrives from your application.",
+      "chunks": "{{done}} of {{total}} chunks imported"
+    },
+    "trigger": {
+      "auto": "auto",
+      "manual": "manual"
+    },
+    "import": {
+      "title": "Import history",
+      "explain": "Pulls daily usage per model from each provider's billing API. Each provider has its own limits; below is exactly what will be imported.",
+      "rangeLabel": "Range to import",
+      "presets": {
+        "30d": "30 days",
+        "90d": "90 days",
+        "6m": "6 months",
+        "1y": "1 year",
+        "2y": "2 years",
+        "max": "Maximum",
+        "custom": "Custom"
+      },
+      "from": "From",
+      "to": "To",
+      "pickDates": "Pick a start and end date.",
+      "started": "{{provider}}: importing {{from}} – {{to}}…",
+      "button_one": "Import ({{count}} provider)",
+      "button_other": "Import ({{count}} providers)",
+      "idempotent": "Re-importing a range recalculates those days; they're never duplicated."
+    },
+    "log": {
+      "title": "Sync log",
+      "running": "In progress…",
+      "done_one": "Done · {{count}} record",
+      "done_other": "Done · {{count}} records",
+      "showDetail": "show detail",
+      "hideDetail": "hide detail"
+    },
+    "danger": {
+      "title": "Danger zone",
+      "explain": "Deletes ALL stored records for a provider (SDK and imported). This can't be undone.",
+      "button": "Delete data",
+      "deleted": "{{provider}}: {{count}} records deleted.",
+      "modalTitle": "Delete all {{provider}} data",
+      "modalBody": "This deletes {{live}} SDK records and {{imported}} imported records for {{provider}}. Imported ones can be fetched again (within the provider's limit); SDK ones can't.",
+      "typeToConfirm": "Type {{name}} to confirm"
+    },
+    "codes": {
+      "no_admin_key": "{{provider}} has no admin key: add one in Keys to import.",
+      "missing_account_id": "{{provider}}'s admin key is missing its Team ID.",
+      "already_running": "A {{provider}} sync is already running; wait for it to finish.",
+      "unsupported_provider": "This provider doesn't support history sync.",
+      "invalid_range": "That date range isn't valid.",
+      "invalid_date": "Enter valid dates.",
+      "range_incomplete": "Provide both a start and an end date.",
+      "range_order": "Start must be on or before end.",
+      "range_too_long": "Range too long (max {{days}} days).",
+      "range_future": "Dates can't be in the future.",
+      "invalid_days": "Days must be a positive whole number.",
+      "range_beyond_retention": "That range is before {{date}}: data older than {{days}} days is deleted nightly.",
+      "range_beyond_provider_lookback": "{{provider}} only keeps the last {{days}} days (since {{date}}); that range can't be imported.",
+      "start_clamped_retention": "starts on {{date}}: data older than {{days}} days is deleted nightly.",
+      "start_clamped_provider": "starts on {{date}}: {{provider}} only keeps the last {{days}} days.",
+      "provider_auth": "{{provider}} rejected the admin key (invalid, revoked or missing billing permissions). Check it in Keys.",
+      "provider_lookback": "{{provider}} has no data that old; try a more recent range.",
+      "provider_rate_limit": "{{provider}} rate-limited the request; the next automatic sync will retry.",
+      "provider_unavailable": "{{provider}} is unavailable right now; the next automatic sync will retry.",
+      "provider_unreachable": "Couldn't reach {{provider}}; the next automatic sync will retry.",
+      "sync_failed": "The sync failed.",
+      "interrupted": "Interrupted (the server restarted before it finished). The next automatic sync will complete it.",
+      "empty": "The provider returned no data for that range; nothing was changed.",
+      "skipped_models": "Models with no price, skipped: {{models}}",
+      "connection": "Couldn't reach the server."
+    }
   }
 }

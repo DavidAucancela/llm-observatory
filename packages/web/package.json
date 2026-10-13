@@ -4,7 +4,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --import ./test/register.mjs --test src/utils/__tests__/dateRange.test.mjs"
   },
   "dependencies": {
     "@babel/runtime": "^7.29.7",

@@ -23,16 +23,6 @@ function IconClose() {
   );
 }
 
-function IconRefresh({ spinning }) {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-      style={{ animation: spinning ? 'spin 1s linear infinite' : 'none' }}>
-      <polyline points="23 4 23 10 17 10" />
-      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-    </svg>
-  );
-}
-
 // ── 3D camera-control icons ── (moved here with the nav cluster itself from
 // MetricSurface3D's old on-canvas .ms3d-nav overlay)
 function IconRotateLeft() {
@@ -257,8 +247,9 @@ function ViewToggle({ chartView, onSetChartView, className, tabIndex }) {
 
 // Unifies the four dashboard chart controls that used to be scattered across
 // the page header, the chart card's own mini-header, and floating overlays
-// inside MetricSurface3D's canvas: model legend, usage hint, refresh, and the
-// 2D/3D toggle. Laid out as a vertical rail down the chart card's right edge so
+// inside MetricSurface3D's canvas: model legend, usage hint and the 2D/3D
+// toggle. (The manual refresh button is gone: the socket's new-metric event
+// already refetches, and provider data arrives through the auto-sync.) Laid out as a vertical rail down the chart card's right edge so
 // the chart body keeps the card's full height — a horizontal bar on top stole
 // ~40px of chart height on every viewport.
 //
@@ -271,7 +262,7 @@ function ViewToggle({ chartView, onSetChartView, className, tabIndex }) {
 // expand button, so switching chart view doesn't require reopening the rail.
 export default function ChartToolbar({
   title, models, hiddenModels, onToggleModel, onIsolateModel,
-  chartView, onSetChartView, onRefresh, syncing,
+  chartView, onSetChartView,
   collapsed, onToggleCollapsed,
   hintOpen, onToggleHint,
   showCompare, comparePrev, onToggleCompare, compareDelta,
@@ -380,10 +371,6 @@ export default function ChartToolbar({
           />
 
           <div className="dash-chart-rail-actions">
-            <button className="obs-btn dash-chart-rail-refresh" tabIndex={collapsed ? -1 : 0} onClick={onRefresh} disabled={syncing}>
-              <IconRefresh spinning={syncing} />
-              {t('dashboard.refresh')}
-            </button>
             <button
               type="button"
               className={`dash-chart-rail-hint-btn${hintOpen ? ' is-active' : ''}`}

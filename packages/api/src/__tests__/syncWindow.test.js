@@ -31,7 +31,8 @@ describe('resolveSyncWindow — days look-back', () => {
   it('trims a look-back longer than retention and says so', () => {
     const w = resolveSyncWindow({ days: '400' }, opts);
     expect(w.clamped).toBe(true);
-    expect(w.warning).toMatch(/retention/);
+    expect(w.warnings[0]).toMatchObject({ code: 'start_clamped_retention' });
+    expect(w.warnings[0].message).toMatch(/retention/);
     expect(w.startDate.getTime()).toBe(retentionCutoffMs(NOW, R));
   });
 });
@@ -73,6 +74,31 @@ describe('resolveSyncWindow — start/end range', () => {
     const cutoff = retentionCutoffMs(NOW, R);
     expect(cutoff).toBeGreaterThanOrEqual(NOW - R * DAY_MS); // purge deletes timestamp < now - R days
     expect(cutoff - (NOW - R * DAY_MS)).toBeLessThan(DAY_MS);
+  });
+});
+
+describe('resolveSyncWindow — provider lookback limit (OpenAI: 1 year)', () => {
+  const NOW2 = Date.parse('2026-10-09T16:40:00Z');
+  const o = { now: NOW2, retention: 1095, lookbackDays: 365, providerLabel: 'OpenAI' };
+  it('trims a start older than the provider allows to its earliest supported day, with a warning', () => {
+    // The exact case OpenAI 400'd on: "Earliest supported start date: 2025-10-09 (UTC)".
+    const w = resolveSyncWindow({ start: '2025-09-09', end: '2026-10-09' }, o);
+    expect(iso(w.startDate)).toBe('2025-10-09T00:00:00.000Z');
+    expect(w.clamped).toBe(true);
+    expect(w.warnings[0]).toMatchObject({ code: 'start_clamped_provider' });
+    expect(w.warnings[0].message).toMatch(/OpenAI only reports usage for the last 365 days/);
+  });
+  it('leaves a window inside the limit untouched', () => {
+    const w = resolveSyncWindow({ start: '2026-01-01', end: '2026-02-01' }, o);
+    expect(iso(w.startDate)).toBe('2026-01-01T00:00:00.000Z');
+    expect(w.clamped).toBe(false);
+  });
+  it('a window entirely older than the provider limit is a 400, not a failed background sync', () => {
+    expect(() => resolveSyncWindow({ start: '2024-01-01', end: '2024-03-01' }, o)).toThrow(/only reports usage for the last 365 days/);
+  });
+  it('no limit (null) keeps the retention-only behaviour', () => {
+    const w = resolveSyncWindow({ start: '2025-09-09', end: '2026-10-09' }, { ...o, lookbackDays: null });
+    expect(iso(w.startDate)).toBe('2025-09-09T00:00:00.000Z');
   });
 });
 

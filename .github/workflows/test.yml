@@ -19,6 +19,18 @@ jobs:
       - run: npm ci
       - run: npm test --workspace=packages/sdk
 
+  web:
+    name: Web utils
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test --workspace=packages/web
+
   sdk-python:
     name: SDK Python
     runs-on: ubuntu-latest
