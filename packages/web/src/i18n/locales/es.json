@@ -119,7 +119,10 @@
     "budgetAlertMsg": "Alerta de gasto — {{provider}} superó {{threshold}} (actual: {{current}})",
     "deliveryFailed": "· no se pudo notificar a Discord",
     "reconciliationMsg": "Reconciliación de {{provider}} con {{pct}}% de desviación",
-    "teamJoinedMsg": "{{email}} aceptó la invitación al equipo"
+    "teamJoinedMsg": "{{email}} aceptó la invitación al equipo",
+    "syncFailingMsg": "La sincronización de {{provider}} falló {{failures}} veces seguidas",
+    "syncFailingAuth": "{{provider}} rechaza la admin key: la sincronización falló {{failures}} veces seguidas",
+    "syncUnpricedMsg": "{{provider}}: uso de modelos sin precio ({{models}}), ese costo no se contabiliza"
   },
   "auth": {
     "brand": "Observatory",
@@ -268,7 +271,6 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "refresh": "Actualizar",
     "tokensOverTime": "Tokens en el tiempo",
     "requestsOverTime": "Solicitudes en el tiempo",
     "costOverTime": "Costo en el tiempo",
@@ -497,7 +499,9 @@
       "lastUsed": "Último uso {{date}}",
       "neverUsed": "Nunca usado",
       "createdDate": "Creado {{date}}",
-      "revokedStatus": "Revocado"
+      "revokedStatus": "Revocado",
+      "importStarted": "Importando todo el historial disponible de {{provider}} en segundo plano.",
+      "importStartedLink": "Ver progreso en Sincronización →"
     },
     "alerts": {
       "newRule": "+ Nueva regla",
@@ -662,7 +666,8 @@
       "rows": "{{live}} del SDK · {{imported}} importados",
       "empty": "Sin datos guardados",
       "limit": "Historial importable desde {{date}}",
-      "limitProvider": "Historial importable desde {{date}} (el proveedor solo guarda {{days}} días)"
+      "limitProvider": "Historial importable desde {{date}} (el proveedor solo guarda {{days}} días)",
+      "expiring": "{{count}} registros anteriores al {{date}} se borrarán en los próximos {{within}} días (se guardan {{days}} días de historial)."
     },
     "status": {
       "noKey": "Sin admin key: los datos de este proveedor solo llegan por el SDK.",
@@ -672,8 +677,9 @@
       "failed": "Falló {{when}}",
       "updated": "Actualizado {{when}}",
       "covers": "cubre {{range}}",
-      "never": "Aún no se ha sincronizado. La sincronización automática importará los últimos 90 días en su próxima ejecución.",
-      "sdkOnly": "Solo SDK: este proveedor no ofrece una API de historial, así que sus datos llegan únicamente desde tu aplicación."
+      "never": "Aún no se ha sincronizado. La sincronización automática importará todo el historial disponible en su próxima ejecución.",
+      "sdkOnly": "Solo SDK: este proveedor no ofrece una API de historial, así que sus datos llegan únicamente desde tu aplicación.",
+      "chunks": "{{done}} de {{total}} tramos importados"
     },
     "trigger": {
       "auto": "auto",
@@ -712,8 +718,10 @@
       "title": "Zona de peligro",
       "explain": "Borra TODOS los registros guardados de un proveedor (del SDK e importados). No se puede deshacer.",
       "button": "Borrar datos",
-      "confirm": "¿Borrar TODOS los datos de {{provider}} (SDK e importados)? No se puede deshacer.",
-      "deleted": "{{provider}}: {{count}} registros borrados."
+      "deleted": "{{provider}}: {{count}} registros borrados.",
+      "modalTitle": "Borrar todos los datos de {{provider}}",
+      "modalBody": "Se borrarán {{live}} registros del SDK y {{imported}} importados de {{provider}}. Los importados se pueden volver a traer (dentro del límite del proveedor); los del SDK no.",
+      "typeToConfirm": "Escribe {{name}} para confirmar"
     },
     "codes": {
       "no_admin_key": "{{provider}} no tiene admin key: agrégala en Claves para poder importar.",

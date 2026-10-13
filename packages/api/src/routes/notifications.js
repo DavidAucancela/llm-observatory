@@ -1,11 +1,12 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { computeInsights } = require('../services/insights');
+const { PROVIDER_LABELS } = require('../constants/providers');
 
 const router = express.Router();
 
 // Deliberately not a persisted notification feed — assembled on every GET
-// from tables that already carry a real event timestamp (3 DB-backed types)
+// from tables that already carry a real event timestamp (4 DB-backed sources)
 // plus computed insights for the 4th type. See schema.sql's comment on
 // notification_reads for why "budget at 92%" isn't one of these sources
 // (it's live state, not a dated event).
@@ -21,7 +22,7 @@ router.get('/', async (req, res) => {
   try {
     const { orgId, id: userId } = req.user;
 
-    const [alerts, reconciliations, joins, readRow, insights, dismissed] = await Promise.all([
+    const [alerts, reconciliations, joins, readRow, insights, dismissed, syncs] = await Promise.all([
       pool.query(
         `SELECT id, provider, current_value, threshold_usd, success, sent_at
          FROM alert_history WHERE org_id = $1 ORDER BY sent_at DESC LIMIT $2`,
@@ -45,6 +46,16 @@ router.get('/', async (req, res) => {
       pool.query(
         `SELECT insight_key FROM insight_dismissals WHERE org_id = $1 AND dismissed_until > NOW()`,
         [orgId]
+      ),
+      // Sync runs services/syncRunner.js flagged: a provider failing several
+      // runs in a row, or usage of models with no price (cost not counted).
+      pool.query(
+        `SELECT id, provider, error_code, details, completed_at FROM sync_logs
+         WHERE org_id = $1 AND completed_at IS NOT NULL
+           AND (details->>'alert' = 'repeated_failure'
+                OR jsonb_array_length(COALESCE(details->'new_skipped_models', '[]'::jsonb)) > 0)
+         ORDER BY completed_at DESC LIMIT $2`,
+        [orgId, MAX_NOTIFICATIONS]
       ),
     ]);
 
@@ -79,6 +90,22 @@ router.get('/', async (req, res) => {
         occurred_at: r.accepted_at,
         data: { email: r.email },
       })),
+      ...syncs.rows.map(r => {
+        const failing = r.details?.alert === 'repeated_failure';
+        return {
+          id: `${failing ? 'sync_failing' : 'sync_unpriced'}:${r.id}`,
+          type: failing ? 'sync_failing' : 'sync_unpriced',
+          occurred_at: r.completed_at,
+          data: {
+            provider: r.provider,
+            providerLabel: PROVIDER_LABELS[r.provider] || r.provider,
+            ...(failing
+              ? { failures: r.details.failures, errorCode: r.error_code }
+              : { models: r.details.new_skipped_models }),
+            discord: r.details?.discord ?? null,
+          },
+        };
+      }),
       ...insights
         .filter(i => !dismissedKeys.has(i.insight_key))
         .map(i => ({

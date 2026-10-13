@@ -19,7 +19,7 @@ const cron = require('node-cron');
 const { Server } = require('socket.io');
 const pool = require('./db/pool');
 const { retentionDays } = require('./utils/retention');
-const { markStaleRuns, refreshAll, autoSyncEnabled, AUTO_SYNC_CRON } = require('./services/syncRunner');
+const { markStaleRuns, refreshAll, autoSyncEnabled, setSyncEmitter, AUTO_SYNC_CRON } = require('./services/syncRunner');
 const logger = require('./logger');
 const { authMiddleware } = require('./middleware/auth');
 
@@ -63,6 +63,8 @@ app.use(cors({ origin: corsOrigin }));
 // once JSON-escaped) — see POST /api/metrics in routes/metrics.js.
 app.use(express.json({ limit: '1mb' }));
 app.set('io', io);
+// Sync progress/status → the Sync page (replaces its 4 s polling).
+setSyncEmitter((payload) => io.emit('sync-update', payload));
 
 // ── Rate limiters ─────────────────────────────────────────────────────────────
 // General API: 1000 req/min per IP
@@ -248,6 +250,7 @@ async function startServer() {
     cron.schedule(AUTO_SYNC_CRON, async () => {
       try {
         const results = await refreshAll({ trigger: 'auto' });
+        if (results.locked) { logger.info('Auto-sync: another instance is running it, skipped'); return; }
         const started = results.filter(r => r.status === 'started').length;
         logger.info(`Auto-sync: ${started} run(s), ${results.length - started} skipped`);
       } catch (err) {

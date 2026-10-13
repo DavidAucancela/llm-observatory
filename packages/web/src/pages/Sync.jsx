@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import ProviderBadge from '../components/ProviderBadge';
 import TopBar from '../components/TopBar';
 import { useApi } from '../hooks/useApi';
+import { useSocket } from '../hooks/useSocket';
 import { useAuth } from '../auth/AuthProvider';
 import { invalidateDataBounds } from '../hooks/useDataBounds';
 import { fmtDateTime, fmtDateYear, fmtRelative } from '../utils/fmt';
@@ -18,6 +19,10 @@ import { isValidDateOnly, monthsBackDay, todayUtc } from '../utils/dateRange';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const dayOf = (iso) => (iso ? String(iso).slice(0, 10) : '');
 const addDays = (day, n) => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+
+// Socket updates drive the page; this slow poll only covers a dropped socket
+// while something is running.
+const FALLBACK_POLL_MS = 20000;
 
 // Import presets. `days`/`months` go back from today; 'max' sends each provider
 // its own earliest importable day (retention + its API's lookback).
@@ -63,6 +68,10 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
   const [expanded, setExpanded] = useState({});     // log id → show raw error
   const [dangerOpen, setDangerOpen] = useState(false);
   const [clearing, setClearing] = useState({});
+  const [confirmClear, setConfirmClear] = useState(null); // provider row awaiting typed confirmation
+  const [confirmText, setConfirmText] = useState('');
+  const [progress, setProgress] = useState({});     // sync id → { done, total } from the socket
+  const { on, off } = useSocket();
 
   const fmtDay = useCallback((d) => fmtDateYear(d, lang), [lang]);
 
@@ -92,8 +101,24 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Runs execute in the background on the server: poll while any is running,
-  // and once they all finish, refresh the date filter's bounds (an import can
+  // Runs execute in the background on the server and announce themselves on
+  // the socket ('sync-update': start, each imported chunk, finish). Progress
+  // ticks update in place; a start or finish refetches the overview (the
+  // event is broadcast and carries no org, so the refetch is what scopes it).
+  useEffect(() => {
+    let timer = null;
+    const onUpdate = (u) => {
+      if (u?.progress) setProgress(prev => ({ ...prev, [u.sync_id]: u.progress }));
+      if (u?.status !== 'running' || u?.progress?.done === 0) {
+        clearTimeout(timer);
+        timer = setTimeout(fetchAll, 300);
+      }
+    };
+    on('sync-update', onUpdate);
+    return () => { off('sync-update', onUpdate); clearTimeout(timer); };
+  }, [on, off, fetchAll]);
+
+  // Once every run finishes, refresh the date filter's bounds (an import can
   // move "data starts on" earlier).
   const anyRunning = Boolean(overview?.providers?.some(p => p.running)) || logs.some(l => l.status === 'running');
   const [wasRunning, setWasRunning] = useState(false);
@@ -101,9 +126,13 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
     if (anyRunning) { setWasRunning(true); }
     else if (wasRunning) { setWasRunning(false); invalidateDataBounds(); }
     if (!anyRunning) return undefined;
-    const id = setInterval(fetchAll, 4000);
+    const id = setInterval(fetchAll, FALLBACK_POLL_MS);
     return () => clearInterval(id);
   }, [anyRunning, fetchAll]);
+
+  // { done, total } of a running sync: the socket's latest tick, else what the
+  // overview/log row last stored.
+  const progressOf = (id, details) => progress[id] || details?.progress || null;
 
   const providers = overview?.providers || [];
   const withKey = providers.filter(p => p.syncable && p.has_admin_key && !p.missing_account_id);
@@ -171,7 +200,7 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
         if (d.success) {
           const w = (d.warnings || [])[0];
           out.push({ provider: p.provider, ok: true, warn: Boolean(w),
-            text: w ? explain(w.code, w.params, d.warning) : t('sync.import.started', { provider: p.label, from: fmtDay(start), to: fmtDay(end) }) });
+            text: w ? explain(w.code, w.params) : t('sync.import.started', { provider: p.label, from: fmtDay(start), to: fmtDay(end) }) });
         } else {
           out.push({ provider: p.provider, ok: false, text: explain(d.code, d.params, d.error) });
         }
@@ -198,8 +227,12 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
     } finally { setBusy(false); fetchAll(); }
   };
 
+  const openClear = (p) => { setConfirmText(''); setConfirmClear(p); };
+  const closeClear = () => setConfirmClear(null);
+  const confirmMatches = confirmClear && confirmText.trim().toLowerCase() === confirmClear.label.toLowerCase();
+
   const handleClear = async (p) => {
-    if (!window.confirm(t('sync.danger.confirm', { provider: p.label }))) return;
+    setConfirmClear(null);
     setClearing(s => ({ ...s, [p.provider]: true }));
     try {
       const d = await (await apiFetch(`/api/sync/${p.provider}/data`, { method: 'DELETE' })).json();
@@ -213,6 +246,17 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
   };
 
   const range = (a, b) => (a && b ? `${fmtDay(a)} – ${fmtDay(b)}` : null);
+
+  function ProgressBar({ value }) {
+    if (!value || !value.total) return null;
+    const pct = Math.round((value.done / value.total) * 100);
+    return (
+      <span className="sync-progress" title={t('sync.status.chunks', { done: value.done, total: value.total })}>
+        <span className="iprog-bar"><span className="iprog-fill" style={{ width: `${pct}%` }} /></span>
+        <span className="sync-progress-pct">{pct}%</span>
+      </span>
+    );
+  }
   const statusColor = (s) => s === 'success' ? 'var(--success)' : s === 'error' ? 'var(--error)' : 'var(--accent)';
 
   // Status line for a provider row — the most relevant fact first.
@@ -242,6 +286,7 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
           <span style={{ color: 'var(--accent)' }}>
             <span className="dot dot-pulse" style={{ background: 'var(--accent)', marginRight: 6 }} />
             {t('sync.status.running', { range: range(latest.start, latest.end) || '' })}
+            <ProgressBar value={progressOf(latest.id, latest.details)} />
           </span>
         )}
         {!p.running && latest?.status === 'error' && (
@@ -312,6 +357,14 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
                 ? t('sync.providers.dataSince', { date: fmtDay(overview.first_data_at) })
                 : t('sync.providers.noData')}
             </div>
+            {overview.expiring?.rows > 0 && (
+              <div className="sync-msg sync-msg--warn" style={{ marginBottom: 8 }}>
+                {t('sync.providers.expiring', {
+                  count: overview.expiring.rows, date: fmtDay(overview.expiring.before),
+                  within: overview.expiring.within_days, days: overview.retention_days,
+                })}
+              </div>
+            )}
             {providers.map(p => (
               <div key={p.provider} className="sync-row obs-row-grid">
                 <ProviderBadge provider={p.provider} size="lg" />
@@ -399,7 +452,7 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
                   const label = providers.find(p => p.provider === l.provider)?.label || l.provider;
                   const skipped = l.details?.skipped_models || [];
                   let text;
-                  if (l.status === 'running') text = t('sync.log.running');
+                  if (l.status === 'running') text = <>{t('sync.log.running')} <ProgressBar value={progressOf(l.id, l.details)} /></>;
                   else if (l.status === 'error') text = explain(l.error_code, { provider: label }, l.error_message || t('common.error'));
                   else if (l.details?.empty) text = t('sync.codes.empty');
                   else text = t('sync.log.done', { count: l.records_synced || 0 });
@@ -441,7 +494,7 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
                       <div key={p.provider} className="sync-danger-row">
                         <ProviderBadge provider={p.provider} />
                         <span className="sync-sub">{t('sync.providers.rows', { live: p.data.live_rows, imported: p.data.sync_rows })}</span>
-                        <button className="obs-btn obs-btn-danger obs-btn-sm" disabled={clearing[p.provider] || p.running} onClick={() => handleClear(p)}>
+                        <button className="obs-btn obs-btn-danger obs-btn-sm" disabled={clearing[p.provider] || p.running} onClick={() => openClear(p)}>
                           {clearing[p.provider] ? '…' : t('sync.danger.button')}
                         </button>
                       </div>
@@ -454,6 +507,34 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
           </>
         )}
       </div>
+
+      {/* Typed confirmation for the irreversible delete (was window.confirm). */}
+      {confirmClear && (
+        <div className="obs-palette-overlay sync-modal-overlay" onClick={closeClear} onKeyDown={e => { if (e.key === 'Escape') closeClear(); }}>
+          <div className="sync-modal" role="dialog" aria-modal="true" aria-labelledby="sync-modal-title" onClick={e => e.stopPropagation()}>
+            <div id="sync-modal-title" className="sync-modal-title">{t('sync.danger.modalTitle', { provider: confirmClear.label })}</div>
+            <p className="sync-sub">
+              {t('sync.danger.modalBody', {
+                provider: confirmClear.label,
+                live: confirmClear.data?.live_rows ?? 0, imported: confirmClear.data?.sync_rows ?? 0,
+              })}
+            </p>
+            <label htmlFor="sync-confirm-input" className="sync-sub">{t('sync.danger.typeToConfirm', { name: confirmClear.label })}</label>
+            <input
+              id="sync-confirm-input" className="obs-input" autoFocus autoComplete="off"
+              value={confirmText} placeholder={confirmClear.label}
+              onChange={e => setConfirmText(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && confirmMatches) handleClear(confirmClear); }}
+            />
+            <div className="sync-modal-actions">
+              <button type="button" className="obs-btn" onClick={closeClear}>{t('common.cancel')}</button>
+              <button type="button" className="obs-btn obs-btn-danger" disabled={!confirmMatches} onClick={() => handleClear(confirmClear)}>
+                {t('sync.danger.button')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

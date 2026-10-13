@@ -933,13 +933,7 @@ body {
   padding: 0 10px;
 }
 
-.dash-chart-rail-actions { display: flex; align-items: center; gap: 6px; }
-.dash-chart-rail-refresh {
-  flex: 1;
-  justify-content: center;
-  height: var(--rail-ctrl-h);
-  padding: 0 10px;
-}
+.dash-chart-rail-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 
 .dash-chart-rail-hint-btn {
   flex-shrink: 0;
@@ -2659,6 +2653,14 @@ body {
 .sync-danger { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid color-mix(in oklab, var(--error) 25%, var(--border)); border-radius: 8px; }
 .sync-danger-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .sync-danger-row .obs-btn { margin-left: auto; }
+.sync-progress { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; vertical-align: middle; }
+.sync-progress .iprog-bar { width: 90px; }
+.sync-progress-pct { font-size: 10.5px; font-variant-numeric: tabular-nums; color: var(--accent); }
+.sync-modal-overlay { align-items: flex-start; }
+.sync-modal { width: 100%; max-width: 420px; margin: 0 16px; padding: 18px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid color-mix(in oklab, var(--error) 30%, var(--border)); border-radius: 12px; box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.5); }
+.sync-modal-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.sync-modal .sync-sub { margin: 0; }
+.sync-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 @media (max-width: 767px) {
   .sync-log-time { text-align: left; }

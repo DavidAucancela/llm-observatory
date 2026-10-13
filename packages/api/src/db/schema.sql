@@ -135,10 +135,21 @@ ALTER TABLE sync_logs ADD COLUMN IF NOT EXISTS date_range_end TIMESTAMPTZ;
 -- trigger: 'manual' (Sync page) | 'auto' (scheduled refresh, services/syncRunner.js).
 -- error_code: machine-readable reason (provider_auth, provider_lookback,
 -- interrupted, …) the UI translates; error_message keeps the raw text.
--- details: { warnings: [{code, params}], skipped_models: [..], empty: bool }.
+-- details: { warnings: [{code, params}], progress: {done, total}, skipped_models: [..],
+--   empty: bool, new_skipped_models: [..], alert: 'repeated_failure', discord: bool|null }
+--   — new_skipped_models / alert are what the notification bell lists.
 ALTER TABLE sync_logs ADD COLUMN IF NOT EXISTS trigger VARCHAR(10) DEFAULT 'manual';
 ALTER TABLE sync_logs ADD COLUMN IF NOT EXISTS error_code VARCHAR(40);
 ALTER TABLE sync_logs ADD COLUMN IF NOT EXISTS details JSONB DEFAULT '{}'::jsonb;
+-- At most one running sync per (org, provider): the insert itself rejects a
+-- second one (services/syncRunner.js maps 23505 to already_running), so two
+-- clicks or two API replicas can't race past a SELECT check. Older duplicates
+-- (pre-index) are closed first or the index couldn't be built.
+UPDATE sync_logs s SET status = 'error', error_code = 'interrupted', completed_at = NOW()
+WHERE s.status = 'running' AND EXISTS (
+  SELECT 1 FROM sync_logs n WHERE n.status = 'running' AND n.org_id IS NOT DISTINCT FROM s.org_id
+    AND n.provider = s.provider AND n.id > s.id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_logs_one_running ON sync_logs (org_id, provider) WHERE status = 'running';
 
 -- ── tags on api_calls (project/env metadata from SDK) ─────────────────────────
 ALTER TABLE api_calls ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '{}'::jsonb;

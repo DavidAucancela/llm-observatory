@@ -31,7 +31,8 @@ describe('resolveSyncWindow — days look-back', () => {
   it('trims a look-back longer than retention and says so', () => {
     const w = resolveSyncWindow({ days: '400' }, opts);
     expect(w.clamped).toBe(true);
-    expect(w.warning).toMatch(/retention/);
+    expect(w.warnings[0]).toMatchObject({ code: 'start_clamped_retention' });
+    expect(w.warnings[0].message).toMatch(/retention/);
     expect(w.startDate.getTime()).toBe(retentionCutoffMs(NOW, R));
   });
 });
@@ -84,7 +85,8 @@ describe('resolveSyncWindow — provider lookback limit (OpenAI: 1 year)', () =>
     const w = resolveSyncWindow({ start: '2025-09-09', end: '2026-10-09' }, o);
     expect(iso(w.startDate)).toBe('2025-10-09T00:00:00.000Z');
     expect(w.clamped).toBe(true);
-    expect(w.warning).toMatch(/OpenAI only reports usage for the last 365 days/);
+    expect(w.warnings[0]).toMatchObject({ code: 'start_clamped_provider' });
+    expect(w.warnings[0].message).toMatch(/OpenAI only reports usage for the last 365 days/);
   });
   it('leaves a window inside the limit untouched', () => {
     const w = resolveSyncWindow({ start: '2026-01-01', end: '2026-02-01' }, o);

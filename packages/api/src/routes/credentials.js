@@ -5,6 +5,7 @@ const { encrypt, decrypt, maskKey } = require('../db/crypto');
 const { requireAdmin } = require('../middleware/auth');
 const { PROVIDERS, PROVIDER_CAPS } = require('../constants/providers');
 const { validateGrokManagementKey } = require('../services/providerUsage');
+const { startInitialImport } = require('../services/syncRunner');
 
 const router = express.Router();
 
@@ -87,7 +88,11 @@ router.post('/', requireAdmin, async (req, res, next) => {
        RETURNING ${CRED_COLUMNS}`,
       [orgId, provider, key_type, label, encrypted, hint, provider_account_id || null]
     );
-    res.status(201).json({ success: true, data: result.rows[0] });
+    // A new admin key imports the provider's full available history right
+    // away (the auto-sync would otherwise wait for its next 6-hourly tick).
+    // `sync_id` lets the UI point at the run; null = nothing started.
+    const syncId = key_type === 'admin' ? await startInitialImport(orgId, provider) : null;
+    res.status(201).json({ success: true, data: result.rows[0], sync_id: syncId });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
     next(err);

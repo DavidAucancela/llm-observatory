@@ -2,7 +2,6 @@ const express = require('express');
 const pool = require('../db/pool');
 const { requireAdmin } = require('../middleware/auth');
 const { SYNC_PROVIDERS, syncableProviders } = require('../services/providerRegistry');
-const { importBuckets, extractBucketTokens } = require('../services/syncImport');
 const { SyncError, startSync, refreshAll, markStaleRuns, syncOverview } = require('../services/syncRunner');
 
 const router = express.Router();
@@ -46,7 +45,7 @@ router.post('/:provider', requireAdmin, async (req, res, next) => {
     res.json({
       success: true, sync_id: run.syncId, message: 'Sync iniciado en background',
       window: { start: run.window.startDate.toISOString(), end: run.window.endDate.toISOString() },
-      clamped: run.window.clamped, warning: run.window.warning, warnings: run.warnings,
+      clamped: run.window.clamped, warnings: run.warnings,
     });
   } catch (err) {
     if (err instanceof SyncError) return sendSyncError(res, err);
@@ -96,5 +95,3 @@ router.get('/status', async (req, res, next) => {
 });
 
 module.exports = router;
-module.exports.importBuckets = importBuckets;      // re-exported for unit tests (lives in services/syncImport.js)
-module.exports.extractBucketTokens = extractBucketTokens;

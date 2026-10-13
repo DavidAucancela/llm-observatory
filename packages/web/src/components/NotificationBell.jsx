@@ -24,6 +24,14 @@ function TypeIcon({ type, insightType }) {
       </svg>
     );
   }
+  if (type === 'sync_failing' || type === 'sync_unpriced') {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+      </svg>
+    );
+  }
   if (type === 'reconciliation') {
     return (
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -42,6 +50,7 @@ function notifSeverityColor(n) {
   if (n.type === 'team_joined') return 'var(--success)';
   if (n.type === 'reconciliation') return n.data.status === 'error' ? 'var(--error)' : 'var(--warning)';
   if (n.type === 'insight') return SEVERITY_COLOR[n.data.severity];
+  if (n.type === 'sync_failing') return 'var(--error)';
   return 'var(--warning)'; // budget_alert
 }
 
@@ -58,6 +67,13 @@ function messageFor(t, n) {
       return { text: t('notifications.reconciliationMsg', { provider: n.data.provider, pct: n.data.deviationPct.toFixed(1) }) };
     case 'team_joined':
       return { text: t('notifications.teamJoinedMsg', { email: n.data.email }) };
+    case 'sync_failing': {
+      const key = n.data.errorCode === 'provider_auth' ? 'notifications.syncFailingAuth' : 'notifications.syncFailingMsg';
+      const base = t(key, { provider: n.data.providerLabel, failures: n.data.failures });
+      return { text: n.data.discord === false ? `${base} ${t('notifications.deliveryFailed')}` : base };
+    }
+    case 'sync_unpriced':
+      return { text: t('notifications.syncUnpricedMsg', { provider: n.data.providerLabel, models: (n.data.models || []).join(', ') }) };
     case 'insight':
       return titleAndDetail(t, { type: n.insight_type, model: n.data.model, metrics: n.data.metrics });
     default:
@@ -70,6 +86,8 @@ function navigateTargetFor(n) {
     case 'budget_alert':   return '/settings?tab=alerts';
     case 'team_joined':    return '/settings?tab=team';
     case 'reconciliation': return '/dashboard';
+    case 'sync_failing':   return '/sync';
+    case 'sync_unpriced':  return '/sync';
     case 'insight':
       if (n.insight_type === 'improvement') return '/models';
       { const p = new URLSearchParams({ model: n.data.model });

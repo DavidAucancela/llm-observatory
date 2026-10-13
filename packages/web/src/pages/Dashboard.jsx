@@ -402,7 +402,6 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   const { range, setRange, customRange, setCustomRange } = useRangeFilter('7d');
   const [summary, setSummary]     = useState(null);
   const [loading, setLoading]     = useState(true);
-  const [syncing, setSyncing]     = useState(false);
   const [hasCredentials, setHasCredentials] = useState(true);
   const [configuredProviders, setConfiguredProviders] = useState([]);
   const [reconciliation, setReconciliation] = useState([]);
@@ -669,8 +668,6 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
             modelToProvider={modelToProvider}
             chartView={chartView}
             onSetChartView={(v) => { setChartView(v); localStorage.setItem('obs-chart-view', v); }}
-            onRefresh={async () => { setSyncing(true); await fetchAll(); setSyncing(false); }}
-            syncing={syncing}
             collapsed={toolbarCollapsed}
             onToggleCollapsed={toggleToolbarCollapsed}
             hintOpen={chartHintOpen}

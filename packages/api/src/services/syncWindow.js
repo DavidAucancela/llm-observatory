@@ -96,10 +96,9 @@ function resolveSyncWindow(
     }
   }
 
-  const last = warnings[warnings.length - 1];
   return {
     startDate: new Date(startMs), endDate: new Date(endMs),
-    clamped: warnings.length > 0, warning: last ? last.message : null, warnings,
+    clamped: warnings.length > 0, warnings,
   };
 }
 
