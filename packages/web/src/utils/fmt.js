@@ -48,6 +48,16 @@ export function fmtDateShort(date, lang) {
   return new Date(`${date}T00:00:00Z`).toLocaleDateString(locale, { day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
 
+/** "12 Aug 2025" — like fmtDateShort but with the year, for spans that can
+ *  cross years (sync history, data ranges). Accepts YYYY-MM-DD or a full ISO
+ *  instant; either way it's read as a UTC day. */
+export function fmtDateYear(date, lang) {
+  if (!date) return '';
+  const day = String(date).slice(0, 10);
+  const locale = lang === 'es' ? 'es-ES' : 'en-US';
+  return new Date(`${day}T00:00:00Z`).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+}
+
 /** "12 Aug – 20 Aug" — short label for a custom date-range picker. */
 export function fmtRangeShort(start, end, lang) {
   if (!start || !end) return '—';

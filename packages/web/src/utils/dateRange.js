@@ -14,7 +14,7 @@ export const RANGE_LABEL_I18N_KEYS = { '24h': 'topbar.range24h', '7d': 'topbar.r
 export const MAX_CUSTOM_SPAN_DAYS = 1830;
 
 // Default DATA_RETENTION_DAYS on the API (DEFAULT_RETENTION_DAYS in
-// packages/api/src/utils/retention.js) — used until useRetention() resolves.
+// packages/api/src/utils/retention.js) — used until useDataBounds() resolves.
 export const DEFAULT_RETENTION_DAYS = 1095;
 
 // One-click shortcuts in the custom-range popover, for looking far back
@@ -50,7 +50,7 @@ export function todayUtc() {
 /**
  * Earliest day (YYYY-MM-DD, UTC) still inside the retention window — the day
  * after this one is the oldest the API hasn't purged yet. `retentionDays` is
- * the org-wide `DATA_RETENTION_DAYS` (default 1095, see useRetention()).
+ * the org-wide `DATA_RETENTION_DAYS` (default 1095, see useDataBounds()).
  */
 export function earliestAvailableDay(today = todayUtc(), retentionDays = DEFAULT_RETENTION_DAYS) {
   const base = Date.parse(`${today}T00:00:00Z`);
@@ -65,6 +65,30 @@ export function earliestAvailableDay(today = todayUtc(), retentionDays = DEFAULT
 }
 
 /**
+ * Earliest day the date filter can usefully show: the later of the retention
+ * edge and the org's first record (`firstDataDay`, null = no data yet, so only
+ * retention applies). Before it every chart would just be zeros.
+ */
+export function earliestSelectableDay(today = todayUtc(), retentionDays = DEFAULT_RETENTION_DAYS, firstDataDay = null) {
+  const retentionEdge = earliestAvailableDay(today, retentionDays);
+  if (!firstDataDay || !isValidDateOnly(firstDataDay)) return retentionEdge;
+  const first = firstDataDay > today ? today : firstDataDay;
+  return first > retentionEdge ? first : retentionEdge;
+}
+
+/**
+ * Start day (YYYY-MM-DD, UTC) of a shortcut `months` calendar months back from
+ * `today` (same day of month, clamped for short months), unclamped.
+ */
+export function monthsBackDay(months, today = todayUtc()) {
+  const [y, m, d] = today.split('-').map(Number);
+  const target = new Date(Date.UTC(y, m - 1 - months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(d, lastDay));
+  return target.toISOString().slice(0, 10);
+}
+
+/**
  * {start, end} (YYYY-MM-DD, UTC) for a QUICK_RANGES entry: `months` calendar
  * months back from `today` (same day of month, clamped for short months), or
  * from `minDay` for 'all'. Never starts before `minDay`, so a shortcut can't
@@ -73,11 +97,7 @@ export function earliestAvailableDay(today = todayUtc(), retentionDays = DEFAULT
 export function quickRangeDates(months, today = todayUtc(), minDay = earliestAvailableDay(today)) {
   let start = minDay;
   if (months != null) {
-    const [y, m, d] = today.split('-').map(Number);
-    const target = new Date(Date.UTC(y, m - 1 - months, 1));
-    const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-    target.setUTCDate(Math.min(d, lastDay));
-    start = target.toISOString().slice(0, 10);
+    start = monthsBackDay(months, today);
     if (start < minDay) start = minDay;
   }
   return { start, end: today };
@@ -87,10 +107,11 @@ export function quickRangeDates(months, today = todayUtc(), minDay = earliestAva
  * Why a custom start/end pair can't be applied, as a `topbar.*` i18n key, or
  * null when it's fine. `today` is injectable for tests. `retentionDays` is
  * optional — omit it (e.g. validating a value read back from localStorage,
- * before useRetention() has resolved) to skip the retention check rather than
- * reject a range that might turn out to be fine.
+ * before useDataBounds() has resolved) to skip the retention check rather than
+ * reject a range that might turn out to be fine. `firstDataDay` (optional)
+ * rejects a start before the org's first record — there'd be nothing to show.
  */
-export function customRangeError(start, end, today = todayUtc(), retentionDays) {
+export function customRangeError(start, end, today = todayUtc(), retentionDays, firstDataDay = null) {
   if (!start || !end) return null; // incomplete: Apply stays disabled, nothing to explain yet
   if (!isValidDateOnly(start) || !isValidDateOnly(end)) return 'topbar.rangeErrInvalid';
   if (start > end) return 'topbar.rangeErrOrder';
@@ -98,6 +119,8 @@ export function customRangeError(start, end, today = todayUtc(), retentionDays) 
   const spanDays = (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / DAY_MS + 1;
   if (spanDays > MAX_CUSTOM_SPAN_DAYS) return 'topbar.rangeErrTooLong';
   if (retentionDays != null && start < earliestAvailableDay(today, retentionDays)) return 'topbar.rangeErrRetention';
+  if (firstDataDay && isValidDateOnly(firstDataDay) && end < firstDataDay) return 'topbar.rangeErrNoData';
+  if (firstDataDay && isValidDateOnly(firstDataDay) && start < firstDataDay) return 'topbar.rangeErrBeforeData';
   return null;
 }
 

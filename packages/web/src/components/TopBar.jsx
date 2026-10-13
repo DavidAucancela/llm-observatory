@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthProvider';
 import NotificationBell from './NotificationBell';
 import { useSidebar } from '../contexts/SidebarContext';
 import { fmtRangeShort, fmtDateShort } from '../utils/fmt';
-import { RANGE_LABEL_I18N_KEYS, QUICK_RANGES, todayUtc, customRangeError, earliestAvailableDay, quickRangeDates } from '../utils/dateRange';
-import { useRetention } from '../hooks/useRetention';
+import { RANGE_LABEL_I18N_KEYS, QUICK_RANGES, todayUtc, customRangeError, earliestSelectableDay, monthsBackDay, quickRangeDates } from '../utils/dateRange';
+import { useDataBounds } from '../hooks/useDataBounds';
 
 function IconHamburger() {
   return (
@@ -147,13 +147,14 @@ function AccountMenu({ darkMode, onToggleDarkMode }) {
 }
 
 // Preset buttons + the custom-range popover. Split out of TopBar so
-// useRetention() (and the fetch it triggers) only ever mounts on pages that
+// useDataBounds() (and the fetch it triggers) only ever mounts on pages that
 // actually pass `ranges` — TopBar itself is rendered on every page (Keys,
 // Sync, Settings included), and React's rules of hooks don't allow calling
-// useRetention() conditionally inside TopBar, so the only way to skip the
+// useDataBounds() conditionally inside TopBar, so the only way to skip the
 // fetch on pages with no date filter is to keep it out of TopBar entirely.
 function RangeFilter({ ranges, range, onRangeChange, customRange, onCustomRangeApply }) {
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
   const [customOpen, setCustomOpen] = useState(false);
   const [draftStart, setDraftStart] = useState('');
   const [draftEnd, setDraftEnd] = useState('');
@@ -161,11 +162,12 @@ function RangeFilter({ ranges, range, onRangeChange, customRange, onCustomRangeA
   // would go stale in a tab left open past midnight).
   const [today, setToday] = useState(todayUtc);
   const wrapRef = useRef(null);
-  // Data retention window (default 3 years) — bounds how far back the picker
-  // lets you go, instead of accepting any date up to MAX_CUSTOM_SPAN_DAYS and
-  // only telling you afterward, via CoverageBanner, that most of it is empty.
-  const retentionDays = useRetention();
-  const minDay = earliestAvailableDay(today, retentionDays);
+  // The picker stops at the later of the retention edge and the org's first
+  // record — before that every chart is zeros — and says why, instead of
+  // accepting any date and only telling you afterward that it's empty.
+  // Older history is imported on the Sync page, which is linked from here.
+  const { retentionDays, firstDataDay, loaded } = useDataBounds();
+  const minDay = earliestSelectableDay(today, retentionDays, firstDataDay);
 
   useEffect(() => {
     if (!customOpen) return;
@@ -187,7 +189,8 @@ function RangeFilter({ ranges, range, onRangeChange, customRange, onCustomRangeA
   };
 
   // Typed input can bypass the inputs' min/max, so validate the values themselves.
-  const draftError = customRangeError(draftStart, draftEnd, today, retentionDays);
+  const draftError = customRangeError(draftStart, draftEnd, today, retentionDays, firstDataDay);
+  const isAdmin = user?.role === 'admin';
   const canApply = Boolean(draftStart && draftEnd) && !draftError;
   const customLabel = range === 'custom' && customRange?.start && customRange?.end
     ? fmtRangeShort(customRange.start, customRange.end, i18n.language)
@@ -223,11 +226,16 @@ function RangeFilter({ ranges, range, onRangeChange, customRange, onCustomRangeA
               {QUICK_RANGES.map(q => {
                 const dates = quickRangeDates(q.months, today, minDay);
                 const active = range === 'custom' && customRange?.start === dates.start && customRange?.end === dates.end;
+                // A shortcut reaching further back than the data would just
+                // repeat "All history" with empty months in front — block it.
+                const tooFar = q.months != null && monthsBackDay(q.months, today) < minDay;
                 return (
                   <button
                     key={q.key}
                     type="button"
                     className={`obs-range-btn${active ? ' active' : ''}`}
+                    disabled={tooFar}
+                    title={tooFar ? t('topbar.quickTooFar', { date: fmtDateShort(minDay, i18n.language) }) : undefined}
                     onClick={() => { onCustomRangeApply(dates); setCustomOpen(false); }}
                   >{t(q.i18n)}</button>
                 );
@@ -251,9 +259,16 @@ function RangeFilter({ ranges, range, onRangeChange, customRange, onCustomRangeA
             </div>
             <div style={{ fontSize: 11, color: draftError ? 'var(--danger, #e5484d)' : 'var(--text-muted, inherit)', opacity: draftError ? 1 : 0.7 }} role={draftError ? 'alert' : undefined}>
               {draftError
-                ? t(draftError, { days: retentionDays })
-                : t('topbar.rangeRetentionHint', { date: fmtDateShort(minDay, i18n.language) })}
+                ? t(draftError, { days: retentionDays, date: fmtDateShort(firstDataDay || minDay, i18n.language) })
+                : (loaded && !firstDataDay
+                  ? t('topbar.rangeNoDataYet')
+                  : t('topbar.rangeRetentionHint', { date: fmtDateShort(minDay, i18n.language) }))}
             </div>
+            {isAdmin && (
+              <Link to="/sync" className="obs-range-sync-link" onClick={() => setCustomOpen(false)}>
+                {t('topbar.rangeImportOlder')}
+              </Link>
+            )}
             <button
               type="button"
               className="obs-btn obs-btn-primary"

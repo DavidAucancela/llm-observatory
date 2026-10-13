@@ -31,11 +31,15 @@ function getRangeIntervals(range) {
   };
 }
 
+// `code` + `params` let a UI translate the reason instead of showing the
+// English `message` (the Sync page maps each code to its own i18n string).
 class RangeParamError extends Error {
-  constructor(message) {
+  constructor(message, code = 'invalid_range', params = {}) {
     super(message);
     this.name = 'RangeParamError';
     this.status = 400;
+    this.code = code;
+    this.params = params;
   }
 }
 
@@ -59,7 +63,7 @@ function parseBound(raw, name, isEnd) {
     const [y, mo, da] = [Number(m[1]), Number(m[2]), Number(m[3])];
     const probe = new Date(Date.UTC(y, mo - 1, da));
     if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== mo - 1 || probe.getUTCDate() !== da) {
-      throw new RangeParamError(`${name} is not a valid date`);
+      throw new RangeParamError(`${name} is not a valid date`, 'invalid_date');
     }
   }
   let d;
@@ -71,7 +75,7 @@ function parseBound(raw, name, isEnd) {
     throw new RangeParamError(`${name} must be YYYY-MM-DD (UTC) or an ISO-8601 datetime with a timezone (e.g. 2026-08-20T00:00:00Z)`);
   }
   if (Number.isNaN(d.getTime())) {
-    throw new RangeParamError(`${name} is not a valid date`);
+    throw new RangeParamError(`${name} is not a valid date`, 'invalid_date');
   }
   return d;
 }
@@ -91,16 +95,16 @@ function parseRange(query = {}, { defaultRange = '7d', allowAll = false } = {}) 
 
   if (hasStart || hasEnd) {
     if (!(hasStart && hasEnd)) {
-      throw new RangeParamError('start and end must be provided together');
+      throw new RangeParamError('start and end must be provided together', 'range_incomplete');
     }
     const startD = parseBound(start, 'start', false);
     const endD   = parseBound(end,   'end',   true);
     if (startD.getTime() > endD.getTime()) {
-      throw new RangeParamError('start must not be after end');
+      throw new RangeParamError('start must not be after end', 'range_order');
     }
     const spanMs = endD.getTime() - startD.getTime() + 1;
     if (spanMs > MAX_CUSTOM_SPAN_DAYS * DAY_MS) {
-      throw new RangeParamError(`Date range too long (max ${MAX_CUSTOM_SPAN_DAYS} days)`);
+      throw new RangeParamError(`Date range too long (max ${MAX_CUSTOM_SPAN_DAYS} days)`, 'range_too_long', { days: MAX_CUSTOM_SPAN_DAYS });
     }
     return {
       range: 'custom', custom: true,

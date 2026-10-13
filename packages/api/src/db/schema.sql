@@ -132,6 +132,13 @@ CREATE TABLE IF NOT EXISTS sync_logs (
 ALTER TABLE sync_logs ADD COLUMN IF NOT EXISTS records_synced INTEGER DEFAULT 0;
 ALTER TABLE sync_logs ADD COLUMN IF NOT EXISTS date_range_start TIMESTAMPTZ;
 ALTER TABLE sync_logs ADD COLUMN IF NOT EXISTS date_range_end TIMESTAMPTZ;
+-- trigger: 'manual' (Sync page) | 'auto' (scheduled refresh, services/syncRunner.js).
+-- error_code: machine-readable reason (provider_auth, provider_lookback,
+-- interrupted, …) the UI translates; error_message keeps the raw text.
+-- details: { warnings: [{code, params}], skipped_models: [..], empty: bool }.
+ALTER TABLE sync_logs ADD COLUMN IF NOT EXISTS trigger VARCHAR(10) DEFAULT 'manual';
+ALTER TABLE sync_logs ADD COLUMN IF NOT EXISTS error_code VARCHAR(40);
+ALTER TABLE sync_logs ADD COLUMN IF NOT EXISTS details JSONB DEFAULT '{}'::jsonb;
 
 -- ── tags on api_calls (project/env metadata from SDK) ─────────────────────────
 ALTER TABLE api_calls ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '{}'::jsonb;

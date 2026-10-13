@@ -49,7 +49,12 @@
     "quick6m": "6 meses",
     "quick1y": "1 año",
     "quick2y": "2 años",
-    "quickAll": "Todo el historial"
+    "quickAll": "Todo el historial",
+    "rangeErrBeforeData": "No hay datos antes del {{date}}: ahí empiezan tus registros",
+    "rangeErrNoData": "No hay datos en ese rango: tus registros empiezan el {{date}}",
+    "rangeNoDataYet": "Aún no hay datos: envía solicitudes con el SDK o importa historial desde Sincronización",
+    "rangeImportOlder": "¿Necesitas historial anterior? Impórtalo desde Sincronización →",
+    "quickTooFar": "Tus datos empiezan el {{date}}"
   },
   "common": {
     "save": "Guardar",
@@ -494,32 +499,6 @@
       "createdDate": "Creado {{date}}",
       "revokedStatus": "Revocado"
     },
-    "sync": {
-      "days7": "7 días",
-      "days30": "30 días",
-      "days60": "60 días",
-      "days90": "90 días",
-      "runButton": "Ejecutar",
-      "clearButton": "Limpiar datos",
-      "logTitle": "Registro de sincronización reciente",
-      "inProgress": "En progreso…",
-      "completed": "Completado",
-      "lastSync": "Última sincronización",
-      "neverSynced": "Nunca sincronizado",
-      "rangeLabel": "Rango de fechas",
-      "modeDays": "Últimos N días",
-      "modeRange": "Rango de fechas",
-      "from": "Desde",
-      "to": "Hasta",
-      "retentionNote": "Los datos de más de {{days}} días se eliminan cada noche, así que no se pueden sincronizar días anteriores.",
-      "clamped": "El inicio se movió a una fecha posterior: los datos más antiguos se eliminan cada noche.",
-      "lastSuccess": "Último sync exitoso",
-      "covers": "cubre",
-      "lastAttempt": "Último intento",
-      "invalidRange": "Elige un rango válido (inicio igual o anterior al fin, sin fechas futuras).",
-      "emptyFetch": "Sin datos",
-      "providerLookback": "Este proveedor solo reporta el uso de los últimos {{days}} días; las fechas anteriores se omiten."
-    },
     "alerts": {
       "newRule": "+ Nueva regla",
       "providerLabel": "Proveedor",
@@ -659,8 +638,109 @@
     "title": "Este rango puede estar incompleto",
     "beforeFirst": "Los registros empiezan el {{date}}.",
     "beyondRetention": "Los datos de más de {{days}} días se eliminan cada noche.",
-    "syncGap": "{{provider}}: el último sync cubre {{from}} – {{to}}.",
-    "syncRange": "Sincronizar este rango",
-    "askAdmin": "Pide a un admin que sincronice este rango."
+    "syncRange": "Importar este historial",
+    "askAdmin": "Pide a un admin que importe este historial desde Sincronización."
+  },
+  "sync": {
+    "loadError": "No se pudo cargar el estado de sincronización. Revisa tu conexión y recarga la página.",
+    "auto": {
+      "on": "Sincronización automática activa · cada {{hours}} h",
+      "off": "Sincronización automática desactivada",
+      "next": "Próxima ejecución: {{when}}.",
+      "noProviders": "Ningún proveedor tiene admin key configurada, así que no hay nada que sincronizar automáticamente.",
+      "explain": "Los días recientes se actualizan solos; aquí solo necesitas importar historial antiguo. Se guardan hasta {{days}} días."
+    },
+    "refresh": {
+      "button": "Actualizar ahora",
+      "started": "{{provider}}: actualizando {{from}} – {{to}}…",
+      "nothing": "No hay proveedores con admin key para actualizar."
+    },
+    "providers": {
+      "title": "Estado por proveedor",
+      "dataSince": "Tus datos empiezan el {{date}}.",
+      "noData": "Aún no hay datos guardados.",
+      "rows": "{{live}} del SDK · {{imported}} importados",
+      "empty": "Sin datos guardados",
+      "limit": "Historial importable desde {{date}}",
+      "limitProvider": "Historial importable desde {{date}} (el proveedor solo guarda {{days}} días)"
+    },
+    "status": {
+      "noKey": "Sin admin key: los datos de este proveedor solo llegan por el SDK.",
+      "addKey": "Agregar admin key en Claves →",
+      "fixKey": "Completar en Claves →",
+      "running": "Sincronizando {{range}}…",
+      "failed": "Falló {{when}}",
+      "updated": "Actualizado {{when}}",
+      "covers": "cubre {{range}}",
+      "never": "Aún no se ha sincronizado. La sincronización automática importará los últimos 90 días en su próxima ejecución.",
+      "sdkOnly": "Solo SDK: este proveedor no ofrece una API de historial, así que sus datos llegan únicamente desde tu aplicación."
+    },
+    "trigger": {
+      "auto": "auto",
+      "manual": "manual"
+    },
+    "import": {
+      "title": "Importar historial",
+      "explain": "Trae el uso diario por modelo desde la API de facturación de cada proveedor. Cada proveedor tiene sus propios límites; abajo ves exactamente qué se importará.",
+      "rangeLabel": "Rango a importar",
+      "presets": {
+        "30d": "30 días",
+        "90d": "90 días",
+        "6m": "6 meses",
+        "1y": "1 año",
+        "2y": "2 años",
+        "max": "Máximo",
+        "custom": "Personalizado"
+      },
+      "from": "Desde",
+      "to": "Hasta",
+      "pickDates": "Elige las fechas de inicio y fin.",
+      "started": "{{provider}}: importando {{from}} – {{to}}…",
+      "button_one": "Importar ({{count}} proveedor)",
+      "button_other": "Importar ({{count}} proveedores)",
+      "idempotent": "Reimportar un rango recalcula esos días; nunca se duplican."
+    },
+    "log": {
+      "title": "Registro de sincronización",
+      "running": "En progreso…",
+      "done_one": "Completado · {{count}} registro",
+      "done_other": "Completado · {{count}} registros",
+      "showDetail": "ver detalle",
+      "hideDetail": "ocultar detalle"
+    },
+    "danger": {
+      "title": "Zona de peligro",
+      "explain": "Borra TODOS los registros guardados de un proveedor (del SDK e importados). No se puede deshacer.",
+      "button": "Borrar datos",
+      "confirm": "¿Borrar TODOS los datos de {{provider}} (SDK e importados)? No se puede deshacer.",
+      "deleted": "{{provider}}: {{count}} registros borrados."
+    },
+    "codes": {
+      "no_admin_key": "{{provider}} no tiene admin key: agrégala en Claves para poder importar.",
+      "missing_account_id": "Falta el Team ID de {{provider}} en su admin key.",
+      "already_running": "Ya hay una sincronización de {{provider}} en curso; espera a que termine.",
+      "unsupported_provider": "Este proveedor no permite sincronizar historial.",
+      "invalid_range": "El rango de fechas no es válido.",
+      "invalid_date": "Ingresa fechas válidas.",
+      "range_incomplete": "Indica fecha de inicio y de fin.",
+      "range_order": "La fecha de inicio debe ser anterior o igual a la de fin.",
+      "range_too_long": "Rango demasiado largo (máximo {{days}} días).",
+      "range_future": "Las fechas no pueden ser futuras.",
+      "invalid_days": "El número de días debe ser un entero positivo.",
+      "range_beyond_retention": "Ese rango es anterior al {{date}}: los datos de más de {{days}} días se eliminan cada noche.",
+      "range_beyond_provider_lookback": "{{provider}} solo guarda los últimos {{days}} días (desde el {{date}}); ese rango no se puede importar.",
+      "start_clamped_retention": "empieza el {{date}}: los datos de más de {{days}} días se eliminan cada noche.",
+      "start_clamped_provider": "empieza el {{date}}: {{provider}} solo guarda los últimos {{days}} días.",
+      "provider_auth": "{{provider}} rechazó la admin key (inválida, revocada o sin permisos de facturación). Revísala en Claves.",
+      "provider_lookback": "{{provider}} no tiene datos tan antiguos; prueba con un rango más reciente.",
+      "provider_rate_limit": "{{provider}} limitó las solicitudes; se reintentará en la próxima sincronización automática.",
+      "provider_unavailable": "{{provider}} no está disponible ahora mismo; se reintentará en la próxima sincronización automática.",
+      "provider_unreachable": "No se pudo conectar con {{provider}}; se reintentará en la próxima sincronización automática.",
+      "sync_failed": "La sincronización falló.",
+      "interrupted": "Se interrumpió (el servidor se reinició antes de terminar). Se completará en la próxima sincronización automática.",
+      "empty": "El proveedor no devolvió datos para ese rango; no se tocó nada.",
+      "skipped_models": "Modelos sin precio, omitidos: {{models}}",
+      "connection": "Error de conexión con el servidor."
+    }
   }
 }

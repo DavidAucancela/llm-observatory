@@ -19,6 +19,7 @@ const cron = require('node-cron');
 const { Server } = require('socket.io');
 const pool = require('./db/pool');
 const { retentionDays } = require('./utils/retention');
+const { markStaleRuns, refreshAll, autoSyncEnabled, AUTO_SYNC_CRON } = require('./services/syncRunner');
 const logger = require('./logger');
 const { authMiddleware } = require('./middleware/auth');
 
@@ -162,6 +163,16 @@ async function startServer() {
     logger.error('Orphan cleanup failed:', err.message);
   }
 
+  // A sync's work lives in this process's memory; after a restart (every
+  // deploy) any 'running' row is an orphan that would otherwise show
+  // "in progress" forever and block the next sync of that provider.
+  try {
+    const n = await markStaleRuns({ all: true });
+    if (n > 0) logger.info(`🧹 Marked ${n} interrupted sync run(s)`);
+  } catch (err) {
+    logger.error('Stale sync cleanup failed:', err.message);
+  }
+
   if (process.env.AUTH_EMAIL && process.env.AUTH_PASSWORD_HASH) {
     try {
       const userRes = await pool.query(
@@ -229,6 +240,21 @@ async function startServer() {
       logger.error('Data retention job failed:', err.message);
     }
   });
+
+  // Cron: auto-sync — keeps every provider with an admin key current (from its
+  // last synced day to now) so nobody has to press Sync on each visit.
+  // AUTO_SYNC_ENABLED=false turns it off.
+  if (autoSyncEnabled()) {
+    cron.schedule(AUTO_SYNC_CRON, async () => {
+      try {
+        const results = await refreshAll({ trigger: 'auto' });
+        const started = results.filter(r => r.status === 'started').length;
+        logger.info(`Auto-sync: ${started} run(s), ${results.length - started} skipped`);
+      } catch (err) {
+        logger.error('Auto-sync failed:', err.message);
+      }
+    });
+  }
 
   // Cron: refresh demo showcase data weekly (Mondays 05:00) — only if the demo org exists
   cron.schedule('0 5 * * 1', async () => {
