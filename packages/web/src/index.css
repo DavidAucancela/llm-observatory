@@ -956,9 +956,8 @@ body {
    Moved out of MetricSurface3D's on-canvas .ms3d-nav overlay into the rail so
    every chart control shares one panel. Same .dash-chart-rail-section anatomy
    as the legend and the foot; rows are full-width grids of equal cells — four
-   for viewpoints and rotate/zoom, three for the toggles (--trio), so no row is
-   a 4-column track left with an empty cell. */
-.dash-chart-rail-3d-views,
+   for rotate/zoom, three for the toggles (--trio), so no row is a track left
+   with an empty cell. */
 .dash-chart-rail-3d-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -2487,7 +2486,6 @@ body {
     flex-wrap: wrap;
     align-items: center;
   }
-  .dash-chart-rail-3d-views,
   .dash-chart-rail-3d-row { flex: 0 1 auto; grid-template-columns: repeat(4, minmax(34px, 1fr)); }
   .dash-chart-rail-3d-row--trio { grid-template-columns: repeat(3, minmax(34px, 1fr)); }
   .dash-chart-hint-banner { padding: 8px 12px; gap: 4px 10px; }

@@ -677,7 +677,6 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
             onToggleCompare={toggleComparePrev}
             compareDelta={compareDelta}
             chart3d={chartView === '3d' ? {
-              onView: (kind) => surface3dRef.current?.flyToView(kind),
               onRotate: (radians) => surface3dRef.current?.nudgeRotate(radians),
               onZoom: (factor) => surface3dRef.current?.nudgeZoom(factor),
               onReset: () => surface3dRef.current?.resetView(),

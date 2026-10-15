@@ -37,8 +37,7 @@ const MAX_FRAME_DELTA = 1 / 30;
 // for frames).
 const SETTLE_EPSILON = 1e-3;
 // Above this many days of span (roughly the 30d/90d ranges), thin the bars
-// and flatten the camera angle so front-row bars stop occluding back rows —
-// see Scene's isDense derivation (spanDays, not raw bucket count, since 24h
+// so front-row bars stop occluding back rows — see the isDense derivation (spanDays, not raw bucket count, since 24h
 // uses hourly buckets while 30d/90d use daily buckets).
 const DENSE_THRESHOLD = 14;
 const MAX_AXIS_LABELS = 7;
@@ -84,7 +83,7 @@ function densityFraming(spanDays) {
     minDist: Math.max(2.5, lerp(DENSITY_ANCHOR_LOW.minDist, DENSITY_ANCHOR_HIGH.minDist)),
   };
 }
-// cameraDistance/cameraYRatio are tuned against the desktop chart box, which
+// cameraDistance is tuned against the desktop chart box, which
 // is wide and short (rail beside the plot). On mobile the box goes nearly
 // square (rail moves above the plot, height fixed at 340px) — with a fixed
 // vertical FOV, a narrower aspect ratio means a narrower horizontal FOV too,
@@ -95,6 +94,33 @@ function densityFraming(spanDays) {
 // roughly consistent. Capped so extremely narrow phones don't zoom out so far
 // the bars become illegibly small.
 const REFERENCE_ASPECT = 2.2;
+// Default view: from the front, raised ~31° so the rows behind the front one
+// and the bar tops read (the first cut, ~18°, looked nearly edge-on), and
+// close enough that the bar field fills the frame. The old default was a
+// 3/4 corner view from cameraDistance, tuned to leave room around the grid —
+// it opened looking at the chart from the side and far away.
+const FRONT_DIR = new THREE.Vector3(0, 0.6, 0.98).normalize();
+const VIEW_TARGET = new THREE.Vector3(0, MAX_HEIGHT / 3, 0);
+// Breathing room around the bar field when fitting it to the frame.
+const FIT_MARGIN = 1.08;
+
+// Distance along FRONT_DIR at which the whole bar field (all columns wide, the
+// tallest bar high) fits a camera with this vertical FOV and aspect. Measured
+// to the grid's center plane, plus half its depth so the front row and the
+// axis labels in front of it fit too.
+function frontFitDistance({ columns, rows, fov, aspect }) {
+  const tanV = Math.tan(THREE.MathUtils.degToRad(fov / 2));
+  const tanH = tanV * Math.max(aspect, 0.1);
+  const width = Math.max(columns, 1) * SPACING;
+  const depth = (Math.max(rows, 1) + 1) * SPACING;
+  const byWidth = (width / 2) / tanH;
+  const byHeight = (MAX_HEIGHT - VIEW_TARGET.y + 0.4) / tanV;
+  return Math.max(byWidth, byHeight) * FIT_MARGIN + depth / 2;
+}
+
+function frontPosition(distance) {
+  return VIEW_TARGET.clone().addScaledVector(FRONT_DIR, distance);
+}
 const MAX_ASPECT_COMPENSATION = 1.6;
 // Idle time before the camera resumes auto-rotating after a drag/zoom/pan,
 // a bar hover, or a pinned tooltip — long enough to read a tooltip without
@@ -318,7 +344,7 @@ function pickLabelIndices(count) {
 // buildGrid trims leading/trailing empty buckets, every grid.hours index hi
 // must be offset by grid.labelOffset to land back on the right xLabels entry.
 // `?? ''` below is just a guard, not the real defense.
-function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance, cameraYRatio, minCameraDistance, barSize, labelFontSize, controlsRef, frameRef, navGoalRef, invalidateRef, orbitLocked, autoRotateOn, hovered, pinned, onHoverChange, onUnhoverChange, onPinToggle, hiddenModels, providerIndices }) {
+function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance, minCameraDistance, barSize, labelFontSize, controlsRef, frameRef, navGoalRef, invalidateRef, orbitLocked, autoRotateOn, hovered, pinned, onHoverChange, onUnhoverChange, onPinToggle, hiddenModels, providerIndices }) {
   const { hours, models, values, rawValues, columnTotals, max, labelOffset } = grid;
   const [autoRotate, setAutoRotate] = useState(false);
   const autoRotateOnRef = useRef(autoRotateOn);
@@ -350,17 +376,35 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
     ? Math.min(REFERENCE_ASPECT / aspect, MAX_ASPECT_COMPENSATION)
     : 1;
   const effectiveCameraDistance = cameraDistance * aspectScale;
+  // The front view's own distance comes from the real frame (aspect, FOV), so
+  // it fills the chart on a wide desktop box and on a near-square phone alike.
+  // Never farther than the old framing, though: fitting all 90 daily columns
+  // across a phone would pull back ~1.5x past it and shrink the bars to
+  // slivers — there the front view crops the sides instead (drag to pan).
+  const fitDistance = Math.max(
+    Math.min(
+      frontFitDistance({ columns: hours.length, rows: models.length, fov: camera.fov, aspect }),
+      effectiveCameraDistance,
+    ),
+    Math.min(effectiveCameraDistance * 0.4, minCameraDistance),
+  );
+  // Fog, grid fade and max zoom-out clear the farthest framing (3/4 view).
+  const viewDistance = effectiveCameraDistance;
 
-  // Reframe whenever the aspect-compensated distance changes — container
-  // resize (breakpoint switch, sidebar collapse) or a range/zoom change.
-  // Doesn't fire on the user's own drag/zoom since those don't touch these
-  // deps, so it won't fight manual navigation.
+  // Reframe to the front view whenever the framing changes — container resize
+  // (breakpoint switch, sidebar collapse) or a range switch. Doesn't fire on
+  // the user's own drag/zoom since those don't touch these deps, so it won't
+  // fight manual navigation.
   useEffect(() => {
-    camera.position.set(effectiveCameraDistance * 0.7, effectiveCameraDistance * cameraYRatio, effectiveCameraDistance * 0.7);
+    camera.position.copy(frontPosition(fitDistance));
     camera.updateProjectionMatrix();
-    if (frameRef) frameRef.current = { distance: effectiveCameraDistance, yRatio: cameraYRatio };
-    controlsRef.current?.update();
-  }, [effectiveCameraDistance, cameraYRatio, camera, controlsRef, frameRef]);
+    if (frameRef) frameRef.current = { distance: effectiveCameraDistance, fitDistance };
+    const controls = controlsRef.current;
+    if (controls) {
+      controls.target.copy(VIEW_TARGET);
+      controls.update();
+    }
+  }, [fitDistance, effectiveCameraDistance, camera, controlsRef, frameRef]);
 
   // Dollies the camera in toward a pinned bar so it reads as "brought to the
   // foreground" instead of just growing a tooltip in place. This only runs
@@ -379,13 +423,12 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
     prevPinnedKeyRef.current = pinnedKey;
     dollyUntilRef.current = performance.now() + DOLLY_SETTLE_MS;
     if (pinned) {
-      const focusDistance = Math.max(effectiveCameraDistance / 3, minCameraDistance);
-      const dir = new THREE.Vector3(0.7, cameraYRatio, 0.7).normalize();
+      const focusDistance = Math.max(Math.min(fitDistance * 0.6, effectiveCameraDistance / 3), minCameraDistance);
       dollyGoalRef.current.target.set(pinned.x, pinned.height / 2, pinned.z);
-      dollyGoalRef.current.position.copy(dollyGoalRef.current.target).addScaledVector(dir, focusDistance);
+      dollyGoalRef.current.position.copy(dollyGoalRef.current.target).addScaledVector(FRONT_DIR, focusDistance);
     } else {
-      dollyGoalRef.current.target.set(0, MAX_HEIGHT / 3, 0);
-      dollyGoalRef.current.position.set(effectiveCameraDistance * 0.7, effectiveCameraDistance * cameraYRatio, effectiveCameraDistance * 0.7);
+      dollyGoalRef.current.target.copy(VIEW_TARGET);
+      dollyGoalRef.current.position.copy(frontPosition(fitDistance));
     }
   }
   useFrame((state, rawDelta) => {
@@ -475,9 +518,8 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
   const offsetX = -((hours.length - 1) * SPACING) / 2;
   const offsetZ = -((models.length - 1) * SPACING) / 2;
   // Labels sit one step beyond the last model row, on the +Z side — that's
-  // the edge nearest the default camera corner (see cameraYRatio/position in
-  // MetricSurface3D), so they read in the foreground instead of being
-  // occluded by the bar field.
+  // the edge facing the default front camera (FRONT_DIR), so they read in the
+  // foreground instead of being occluded by the bar field.
   const labelZ = offsetZ + models.length * SPACING;
   const labelIndices = pickLabelIndices(hours.length);
 
@@ -506,7 +548,7 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
           of a plain fill. Fog fades the grid/bars toward that same surface
           tone at distance, blending the geometry into the gradient instead
           of cutting off at a hard edge. */}
-      <fog attach="fog" args={[palette.surface, effectiveCameraDistance * 0.9, effectiveCameraDistance * 2.3]} />
+      <fog attach="fog" args={[palette.surface, viewDistance * 0.9, viewDistance * 2.3]} />
       <hemisphereLight args={[palette.text, palette.surface, 0.3]} />
       <ambientLight intensity={0.4} />
       <directionalLight position={[6, 10, 6]} intensity={0.75} />
@@ -516,7 +558,7 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
         position={[0, 0, 0]}
         cellColor={palette.gridLine}
         sectionColor={palette.gridLine}
-        fadeDistance={effectiveCameraDistance * 2}
+        fadeDistance={viewDistance * 2}
         infiniteGrid={false}
       />
       <ContactShadows
@@ -595,7 +637,7 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
         onStart={pauseAutoRotate}
         onEnd={scheduleAutoRotate}
         minDistance={Math.min(effectiveCameraDistance * 0.4, minCameraDistance)}
-        maxDistance={effectiveCameraDistance * 1.8}
+        maxDistance={viewDistance * 1.8}
         maxPolarAngle={Math.PI / 2.1}
         target={[0, MAX_HEIGHT / 3, 0]}
         makeDefault
@@ -642,7 +684,7 @@ function MetricSurface3D({
   // REFERENCE_ASPECT above) — resetView reads it instead of the raw
   // pre-aspect cameraDistance so the reset button reframes to what's actually
   // on screen, not the desktop-tuned default.
-  const frameRef = useRef({ distance: 0, yRatio: 0.55 });
+  const frameRef = useRef({ distance: 0, fitDistance: 0 });
   const grid = useMemo(() => buildGrid(modelTimeSeries || [], metric), [modelTimeSeries, metric]);
   const providerIndices = useMemo(() => modelProviderIndices(grid.models, modelToProvider), [grid.models, modelToProvider]);
   const [hovered, setHovered] = useState(null);
@@ -701,7 +743,6 @@ function MetricSurface3D({
   const cameraDistance = (gridSpan * 1.4 + 5) * zoomFactor;
   const isDense = spanDays > DENSE_THRESHOLD;
   const barSize = isDense ? BAR_SIZE * 0.6 : BAR_SIZE;
-  const cameraYRatio = isDense ? 0.85 : 0.55;
   const labelFontSize = Math.max(
     BASE_LABEL_FONT_SIZE,
     BASE_LABEL_FONT_SIZE * Math.sqrt(gridSpan / BASE_LABEL_GRID_SPAN)
@@ -709,7 +750,7 @@ function MetricSurface3D({
 
   // Read Scene's aspect-compensated framing when it's available, else the raw
   // desktop-tuned defaults above.
-  const framing = () => (frameRef.current.distance ? frameRef.current : { distance: cameraDistance, yRatio: cameraYRatio });
+  const framing = () => (frameRef.current.distance ? frameRef.current : { distance: cameraDistance, fitDistance: cameraDistance });
 
   // Don't rely on OrbitControls' own reset() — it restores whatever
   // position/target existed when the controls were constructed, which is only
@@ -721,36 +762,21 @@ function MetricSurface3D({
     setPinned(null);
     const controls = controlsRef.current;
     if (!controls) return;
-    const { distance, yRatio } = framing();
-    controls.object.position.set(distance * 0.7, distance * yRatio, distance * 0.7);
-    controls.target.set(0, MAX_HEIGHT / 3, 0);
+    controls.object.position.copy(frontPosition(framing().fitDistance));
+    controls.target.copy(VIEW_TARGET);
     controls.update();
   };
 
-  // The fly-to / nudge handlers just stage a goal in navGoalRef and let
-  // Scene's fly-to useFrame damp the camera there over a short settle window —
-  // no snapping, and it yields to a manual orbit/pan the moment the user
-  // starts one.
-  const flyToView = (kind) => {
-    setPinned(null);
-    const { distance: d, yRatio } = framing();
-    const target = new THREE.Vector3(0, MAX_HEIGHT / 3, 0);
-    let position;
-    switch (kind) {
-      case 'front': position = new THREE.Vector3(0, d * 0.32, d * 0.98); break;
-      case 'top':   position = new THREE.Vector3(0.001, d * 1.45, 0.001); break;
-      case 'side':  position = new THREE.Vector3(d * 0.98, d * 0.32, 0); break;
-      default:      position = new THREE.Vector3(d * 0.7, d * yRatio, d * 0.7); break; // iso / 3-quarter
-    }
-    setNavGoal({ position, target, until: performance.now() + 700 });
-  };
-
+  // The nudge handlers just stage a goal in navGoalRef and let Scene's fly-to
+  // useFrame damp the camera there over a short settle window — no snapping,
+  // and it yields to a manual orbit/pan the moment the user starts one.
   const nudgeZoom = (factor) => {
     const c = controlsRef.current;
     if (!c) return;
     const target = c.target.clone();
     const offset = c.object.position.clone().sub(target);
-    const maxLen = framing().distance * 1.8;
+    const { distance, fitDistance: fit } = framing();
+    const maxLen = Math.max(distance, fit) * 1.8;
     const len = THREE.MathUtils.clamp(offset.length() * factor, minCameraDistance, maxLen);
     setNavGoal({ position: target.clone().add(offset.setLength(len)), target, until: performance.now() + 450 });
   };
@@ -763,7 +789,7 @@ function MetricSurface3D({
     setNavGoal({ position: target.clone().add(offset), target, until: performance.now() + 550 });
   };
 
-  useImperativeHandle(ref, () => ({ flyToView, nudgeZoom, nudgeRotate, resetView }));
+  useImperativeHandle(ref, () => ({ nudgeZoom, nudgeRotate, resetView }));
 
   if (loading) {
     return <div className="obs-skeleton" style={{ height: '100%', borderRadius: 4 }} />;
@@ -789,7 +815,7 @@ function MetricSurface3D({
           resize={{ scroll: false, debounce: 0 }}
           dpr={[1, 2]}
           gl={{ alpha: true }}
-          camera={{ position: [cameraDistance * 0.7, cameraDistance * cameraYRatio, cameraDistance * 0.7], fov: 45 }}
+          camera={{ position: frontPosition(cameraDistance).toArray(), fov: 45 }}
           onPointerMissed={() => setPinned(null)}
         >
           <Scene
@@ -801,7 +827,6 @@ function MetricSurface3D({
             gridSpan={gridSpan}
             labelFontSize={labelFontSize}
             cameraDistance={cameraDistance}
-            cameraYRatio={cameraYRatio}
             minCameraDistance={minCameraDistance}
             barSize={barSize}
             controlsRef={controlsRef}
