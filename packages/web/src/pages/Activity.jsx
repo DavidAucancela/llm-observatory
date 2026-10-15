@@ -9,7 +9,7 @@ import { fmtDateTime, formatCost, fmtLatency } from '../utils/fmt';
 import { useApi } from '../hooks/useApi';
 import { useRangeFilter } from '../hooks/useRangeFilter';
 import { useProviders } from '../hooks/useProviders';
-import { RANGE_PRESETS, buildRangeParams } from '../utils/dateRange';
+import { RANGE_PRESETS, buildRangeParams, customRangeError } from '../utils/dateRange';
 
 const RANGES = RANGE_PRESETS;
 
@@ -139,7 +139,11 @@ function RequestsTab({ range, rangeParams, configuredProviders }) {
 
         {model && (
           <span className="obs-btn obs-btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'default' }}>
-            <span className="col-mono" style={{ fontFamily: 'var(--font-mono)' }}>{model}</span>
+            <span className="col-mono" style={{ fontFamily: 'var(--font-mono)' }} title={model.split(',').join('\n')}>
+              {model.split(',').length > 2
+                ? `${model.split(',').slice(0, 2).join(', ')} +${model.split(',').length - 2}`
+                : model.split(',').join(', ')}
+            </span>
             <button
               type="button"
               aria-label={t('common.remove')}
@@ -297,6 +301,15 @@ export default function Activity({ darkMode, onToggleDarkMode }) {
   const { apiFetch } = useApi();
   const { t } = useTranslation();
   const rangeParams = buildRangeParams(range, customRange);
+
+  // Deep link from the Dashboard's 3D bar card: ?start=&end= (YYYY-MM-DD)
+  // becomes the shared custom range, so the TopBar shows what's filtered.
+  const [searchParams] = useSearchParams();
+  useEffect(() => {
+    const start = searchParams.get('start');
+    const end = searchParams.get('end');
+    if (start && end && customRangeError(start, end) === null) setCustomRange({ start, end });
+  }, []);
 
   useEffect(() => {
     apiFetch('/api/credentials')
