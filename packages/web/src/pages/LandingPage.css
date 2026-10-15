@@ -74,18 +74,43 @@
   transition: opacity 0.15s, transform 0.15s;
 }
 .lp-nav-cta:hover { opacity: 0.9; transform: translateY(-1px); }
+.lp-nav-lang-wrap { position: relative; }
 .lp-nav-lang {
-  padding: 5px 11px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 30px; padding: 0;
   background: rgba(255,255,255,0.07);
   color: #c4c4d4;
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: 7px;
-  font-size: 12px; font-weight: 600; font-family: inherit;
+  font-family: inherit;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
-  letter-spacing: 0.03em;
 }
-.lp-nav-lang:hover { background: rgba(255,255,255,0.13); color: #fff; }
+.lp-nav-lang:hover,
+.lp-nav-lang[aria-expanded="true"] { background: rgba(255,255,255,0.13); color: #fff; }
+.lp-nav-lang-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 110;
+  min-width: 140px; padding: 4px;
+  background: rgba(14,14,26,0.97);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 9px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  backdrop-filter: blur(12px);
+}
+.lp-nav-lang-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 7px 10px;
+  background: none; border: none; border-radius: 6px;
+  color: #c4c4d4; font-size: 13px; font-family: inherit; text-align: left;
+  cursor: pointer;
+}
+.lp-nav-lang-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.lp-nav-lang-item.is-active { color: #fff; }
+.lp-nav-lang-code {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  color: #8a8aa0; width: 20px;
+}
+.lp-nav-lang-item.is-active .lp-nav-lang-code { color: #818cf8; }
 
 /* ══════════════════════════════════════════════════
    HERO

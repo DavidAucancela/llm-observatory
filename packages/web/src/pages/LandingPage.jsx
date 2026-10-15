@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import './LandingPage.css';
@@ -19,13 +19,82 @@ const GitHubIcon = () => (
 /* ══════════════════════════════════════════════════════
    1. NAVBAR
 ══════════════════════════════════════════════════════ */
-function Nav({ onDashboard }) {
+// Endonyms on purpose — each language is listed in its own name, so it's
+// recognizable whichever one the page is currently in.
+const LANGS = [
+  { code: 'es', label: 'Español' },
+  { code: 'en', label: 'English' },
+];
+
+const GlobeIcon = () => (
+  <IC size={16} d={<>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M2 12h20" />
+    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+  </>} />
+);
+
+function LangMenu() {
   const { t, i18n } = useTranslation();
-  const toggleLang = () => {
-    const next = i18n.language === 'en' ? 'es' : 'en';
-    i18n.changeLanguage(next);
-    localStorage.setItem('lang', next);
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const current = i18n.language?.startsWith('en') ? 'en' : 'es';
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const pick = (code) => {
+    setOpen(false);
+    if (code === current) return;
+    i18n.changeLanguage(code);
+    try { localStorage.setItem('lang', code); } catch { /* not remembered */ }
   };
+
+  return (
+    <div className="lp-nav-lang-wrap" ref={ref}>
+      <button
+        type="button"
+        className="lp-nav-lang"
+        onClick={() => setOpen(v => !v)}
+        title={t('sidebar.language')}
+        aria-label={t('sidebar.language')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <GlobeIcon />
+      </button>
+      {open && (
+        <div className="lp-nav-lang-menu" role="menu">
+          {LANGS.map(({ code, label }) => (
+            <button
+              key={code}
+              type="button"
+              role="menuitemradio"
+              aria-checked={code === current}
+              className={`lp-nav-lang-item${code === current ? ' is-active' : ''}`}
+              onClick={() => pick(code)}
+            >
+              <span className="lp-nav-lang-code">{code.toUpperCase()}</span>
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Nav({ onDashboard }) {
+  const { t } = useTranslation();
   return (
     <nav className="lp-nav">
       <a className="lp-nav-brand" href="#">
@@ -39,9 +108,7 @@ function Nav({ onDashboard }) {
         <a className="lp-nav-link lp-nav-link-gh" href="https://github.com/DavidAucancela/llm-observatory" target="_blank" rel="noreferrer">
           <GitHubIcon /> GitHub
         </a>
-        <button className="lp-nav-lang" onClick={toggleLang} title={t('sidebar.language')}>
-          {i18n.language === 'en' ? '🇪🇸 ES' : '🇬🇧 EN'}
-        </button>
+        <LangMenu />
         <button className="lp-nav-cta" onClick={onDashboard}>{t('landing.navDashboard')}</button>
       </div>
     </nav>
