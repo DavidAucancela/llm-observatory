@@ -4,6 +4,7 @@ const pool = require('../db/pool');
 const { decrypt } = require('../db/crypto');
 const { requireAdmin } = require('../middleware/auth');
 const { judgeApiCall } = require('../services/llmJudge');
+const { emitNewMetric } = require('../services/realtime');
 
 const router = express.Router();
 
@@ -118,7 +119,7 @@ router.post('/judge', requireAdmin, async (req, res, next) => {
         judged.inputTokens + judged.outputTokens, judged.costUsd,
       ]
     );
-    if (req.app.get('io')) req.app.get('io').emit('new-metric', metricResult.rows[0]);
+    emitNewMetric(req, metricResult.rows[0]);
 
     res.status(201).json({ success: true, data: evalResult.rows[0] });
   } catch (err) {

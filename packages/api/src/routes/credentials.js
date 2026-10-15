@@ -6,6 +6,7 @@ const { requireAdmin } = require('../middleware/auth');
 const { PROVIDERS, PROVIDER_CAPS } = require('../constants/providers');
 const { validateGrokManagementKey } = require('../services/providerUsage');
 const { startInitialImport } = require('../services/syncRunner');
+const { emitNewMetric } = require('../services/realtime');
 
 const router = express.Router();
 
@@ -164,7 +165,7 @@ router.post('/:id/ping', requireAdmin, async (req, res, next) => {
       [orgId, provider, model, key_hint]
     );
 
-    if (req.app.get('io')) req.app.get('io').emit('new-metric', result.rows[0]);
+    emitNewMetric(req, result.rows[0]);
     res.json({ success: true, data: result.rows[0] });
   } catch (err) { next(err); }
 });
