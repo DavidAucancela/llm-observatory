@@ -2661,6 +2661,12 @@ body {
 .sync-msg--warn  { color: var(--warning); border-color: color-mix(in oklab, var(--warning) 30%, var(--border)); }
 .sync-msg--error { color: var(--error);   border-color: color-mix(in oklab, var(--error) 30%, var(--border)); }
 
+.dash-load-error {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  font-size: 12px; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px;
+  color: var(--error); border: 1px solid color-mix(in oklab, var(--error) 30%, var(--border));
+}
+
 .sync-row {
   display: grid; grid-template-columns: 130px 1fr 260px; gap: 16px; align-items: start;
   padding: 14px 0; border-bottom: 1px solid var(--border-soft); font-size: 12px; color: var(--muted);
