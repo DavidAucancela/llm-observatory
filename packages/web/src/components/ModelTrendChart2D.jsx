@@ -89,13 +89,14 @@ export default function ModelTrendChart2D({ modelTimeSeries, metric, xLabels, lo
   const providerIndices = useMemo(() => modelProviderIndices(grid.models, modelToProvider), [grid.models, modelToProvider]);
 
   // "Invocation" effect on appear is the Line's own draw-in animation
-  // (isAnimationActive below); this flag drives a distinct "settle" effect
-  // once that finishes — a brief glow pulse (see .chart2d-draw-complete in
-  // index.css) instead of the lines just stopping. Reset whenever the
-  // series actually changes (new range, new live metric, toggled metric) so
-  // the reveal replays instead of only ever firing once per page load.
-  const [justRevealed, setJustRevealed] = useState(false);
-  useEffect(() => { setJustRevealed(false); }, [modelTimeSeries, metric]);
+  // (isAnimationActive below); once it finishes, a brief glow pulse settles it
+  // (see .chart2d-draw-complete in index.css). Both play once per view — a new
+  // range remounts this component (the loading skeleton replaces it), a new
+  // metric changes `metric` — but not on live refreshes: replaying the draw-in
+  // and glow on every incoming metric made the chart flash during bursts.
+  const [settledMetric, setSettledMetric] = useState(null);
+  const settled = settledMetric === metric;
+  const onAnimationEnd = () => setSettledMetric(metric);
 
   // Real request counts per (hour, model), independent of the selected
   // metric — a metric value can legitimately be 0 on a real datapoint (e.g.
@@ -146,7 +147,7 @@ export default function ModelTrendChart2D({ modelTimeSeries, metric, xLabels, lo
         // once its draw-in animation finishes (see the keyframe in
         // index.css) — Recharts applies a component's className to its
         // rendered <svg>, so this reaches every descendant .recharts-line.
-        className={justRevealed ? 'chart2d-draw-complete' : ''}
+        className={settled ? 'chart2d-draw-complete' : ''}
       >
         <CartesianGrid strokeDasharray="3 3" stroke={palette.border} vertical={false} />
         <XAxis dataKey="name" stroke={palette.muted} tick={{ fontSize: 11, fill: palette.muted }} tickLine={false} axisLine={{ stroke: palette.border }} />
@@ -180,10 +181,10 @@ export default function ModelTrendChart2D({ modelTimeSeries, metric, xLabels, lo
               dot={(props) => <RealDataDot key={`${model}-${props.payload?.name}`} {...props} color={color} />}
               hide={hiddenModels.has(model)}
               activeDot={{ r: 4 }}
-              isAnimationActive
+              isAnimationActive={!settled}
               animationDuration={LINE_ANIMATION_MS}
               animationEasing="ease-out"
-              onAnimationEnd={() => setJustRevealed(true)}
+              onAnimationEnd={onAnimationEnd}
             />
           );
         })}
@@ -197,10 +198,10 @@ export default function ModelTrendChart2D({ modelTimeSeries, metric, xLabels, lo
             strokeDasharray="5 4"
             dot={false}
             activeDot={{ r: 3 }}
-            isAnimationActive
+            isAnimationActive={!settled}
             animationDuration={LINE_ANIMATION_MS}
             animationEasing="ease-out"
-            onAnimationEnd={() => setJustRevealed(true)}
+            onAnimationEnd={onAnimationEnd}
           />
         )}
       </LineChart>
