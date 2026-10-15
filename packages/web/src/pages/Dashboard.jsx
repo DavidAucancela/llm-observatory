@@ -398,6 +398,10 @@ function RangeSpend({ byProvider, totalCost, prevTotalCost, range, customRange, 
 
 const RANGES = RANGE_PRESETS;
 
+// Live refresh cadence: at most one summary refetch per window, however many
+// new-metric events arrive in it.
+const LIVE_REFRESH_MS = 2500;
+
 export default function Dashboard({ darkMode, onToggleDarkMode }) {
   const { range, setRange, customRange, setCustomRange } = useRangeFilter('7d');
   const [summary, setSummary]     = useState(null);
@@ -439,43 +443,69 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   const rangeParams = useMemo(() => buildRangeParams(range, customRange), [range, customRange]);
   const rangeQuery  = useMemo(() => new URLSearchParams(rangeParams).toString(), [rangeParams]);
 
-  // Latest-request-wins: a slow response for an old range must not overwrite the
+  // Latest-request-wins: a slow summary for an old range must not overwrite the
   // one the user is looking at now. `silent` (live socket refreshes) skips the
   // loading flag so the skeletons don't flash on every incoming metric.
   const fetchSeq = useRef(0);
-  const fetchAll = useCallback(async (silent = false) => {
+  const fetchSummary = useCallback(async (silent = false) => {
     const seq = ++fetchSeq.current;
     if (!silent) setLoading(true);
     try {
-      const [sumRes, credRes, reconRes] = await Promise.all([
-        apiFetch(`/api/metrics/summary?${rangeQuery}`),
-        apiFetch(`/api/credentials`),
-        apiFetch(`/api/reconciliation/latest`),
-      ]);
-      const sum = await sumRes.json();
-      const creds = (await credRes.json());
-      const recon = (await reconRes.json()).latest || [];
-      if (seq !== fetchSeq.current) return; // superseded by a newer fetch
-      setSummary(sum);
-      const credList = creds.credentials || creds.data || [];
-      setHasCredentials(credList.length > 0);
-      setConfiguredProviders([...new Set(credList.map(c => c.provider))]);
-      setReconciliation(recon);
+      const sum = await (await apiFetch(`/api/metrics/summary?${rangeQuery}`)).json();
+      if (seq === fetchSeq.current) setSummary(sum);
     } catch (err) { console.error(err); }
     finally { if (seq === fetchSeq.current) setLoading(false); }
   }, [rangeQuery]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  // Credentials and the latest reconciliation don't depend on the range and
+  // don't change when a metric lands, so they load once per mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [credRes, reconRes] = await Promise.all([
+          apiFetch(`/api/credentials`),
+          apiFetch(`/api/reconciliation/latest`),
+        ]);
+        const creds = await credRes.json();
+        const recon = (await reconRes.json()).latest || [];
+        if (cancelled) return;
+        const credList = creds.credentials || creds.data || [];
+        setHasCredentials(credList.length > 0);
+        setConfiguredProviders([...new Set(credList.map(c => c.provider))]);
+        setReconciliation(recon);
+      } catch (err) { console.error(err); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
   // A live metric is "now": only refresh when the selected window can contain it.
   // A historical custom range (end before today, UTC) can't change.
+  // A burst of metrics (an agent loop, a batch job) is coalesced into one
+  // summary refetch per LIVE_REFRESH_MS; a hidden tab defers it until visible.
   const rangeIncludesNow = range !== 'custom' || (customRange?.end || '') >= todayUtc();
   useEffect(() => {
     if (!rangeIncludesNow) return undefined;
-    const onNewMetric = () => fetchAll(true);
+    let timer = null;
+    let pending = false;
+    const flush = () => {
+      timer = null;
+      if (document.hidden) { pending = true; return; }
+      pending = false;
+      fetchSummary(true);
+    };
+    const onNewMetric = () => { if (!timer) timer = setTimeout(flush, LIVE_REFRESH_MS); };
+    const onVisible = () => { if (!document.hidden && pending) flush(); };
     on('new-metric', onNewMetric);
-    return () => off('new-metric', onNewMetric);
-  }, [on, off, fetchAll, rangeIncludesNow]);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      off('new-metric', onNewMetric);
+      document.removeEventListener('visibilitychange', onVisible);
+      clearTimeout(timer);
+    };
+  }, [on, off, fetchSummary, rangeIncludesNow]);
 
   const s    = summary?.summary;
   const prev = summary?.prev_summary;
