@@ -338,6 +338,8 @@
     "mobileTabOverview": "Resumen",
     "mobileTabCosts": "Costos",
     "mobileTabMore": "Más",
+    "rangeSpendEmpty": "Sin gasto por proveedor en este período",
+    "tooltipMoreModels": "+{{count}} modelos más",
     "reconciled": "Reconciliado",
     "reconciliationDeviation": "{{pct}}% de desviación",
     "reconciliationHint": "Reportado por cliente: {{client}} · Facturado por el proveedor: {{provider}}",

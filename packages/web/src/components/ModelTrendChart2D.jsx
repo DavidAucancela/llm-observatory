@@ -34,7 +34,12 @@ function RealDataDot({ cx, cy, payload, dataKey, color }) {
   return <circle cx={cx} cy={cy} r={3} fill="var(--surface, #fff)" stroke={color} strokeWidth={2} />;
 }
 
+// A busy bucket with a dozen models made the tooltip taller than the chart on
+// a phone, covering what it describes; the rest collapse into "+N".
+const TOOLTIP_MAX_ROWS = 6;
+
 function CustomTooltip({ active, payload, label, metric }) {
+  const { t } = useTranslation();
   if (!active || !payload?.length) return null;
   // `grid.models` (and so `payload`) is every model with activity ANYWHERE in
   // the selected range — a model quiet on this particular day still gets a
@@ -56,7 +61,7 @@ function CustomTooltip({ active, payload, label, metric }) {
       {sorted.length === 0 && (
         <div className="chart2d-tooltip-empty">—</div>
       )}
-      {sorted.map(entry => {
+      {sorted.slice(0, TOOLTIP_MAX_ROWS).map(entry => {
         const requests = entry.payload?.[`${entry.dataKey}__reqs`] || 0;
         return (
           <div key={entry.dataKey} className="chart2d-tooltip-row">
@@ -69,8 +74,21 @@ function CustomTooltip({ active, payload, label, metric }) {
           </div>
         );
       })}
+      {sorted.length > TOOLTIP_MAX_ROWS && (
+        <div className="chart2d-tooltip-more">{t('dashboard.tooltipMoreModels', { count: sorted.length - TOOLTIP_MAX_ROWS })}</div>
+      )}
     </div>
   );
+}
+
+// Y-axis width sized to its widest tick instead of a fixed 56px, which took
+// ~15% of a phone-width chart for labels like "$1" or "12". ~6.5px per char
+// at the 11px tick font, plus the gap to the plot.
+function yAxisWidth(data, models, metric) {
+  let max = 0;
+  for (const row of data) for (const m of models) if (row[m] > max) max = row[m];
+  const label = formatMetricValue(max, metric);
+  return Math.min(64, Math.max(32, Math.ceil(label.length * 6.5) + 10));
 }
 
 // `prevSeries`, when given, must already be aligned index-for-index with the
@@ -156,7 +174,7 @@ export default function ModelTrendChart2D({ modelTimeSeries, metric, xLabels, lo
           tick={{ fontSize: 11, fill: palette.muted }}
           tickLine={false}
           axisLine={false}
-          width={56}
+          width={yAxisWidth(data, grid.models, metric)}
           tickFormatter={(v) => formatMetricValue(v, metric)}
         />
         <Tooltip content={<CustomTooltip metric={metric} />} cursor={{ stroke: palette.border }} />

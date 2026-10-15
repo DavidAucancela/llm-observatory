@@ -338,6 +338,8 @@
     "mobileTabOverview": "Overview",
     "mobileTabCosts": "Costs",
     "mobileTabMore": "More",
+    "rangeSpendEmpty": "No provider spend in this period",
+    "tooltipMoreModels": "+{{count}} more models",
     "reconciled": "Reconciled",
     "reconciliationDeviation": "{{pct}}% deviation",
     "reconciliationHint": "Client-reported: {{client}} · Billed by provider: {{provider}}",
