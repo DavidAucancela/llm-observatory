@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { colorForModel } from '../utils/chartColors';
 import { modelProviderIndices } from '../utils/providerColors';
 import { shortModelName } from '../utils/modelAlias';
+import { useCoarsePointer } from '../hooks/useCoarsePointer';
 
 function IconHelp() {
   return (
@@ -160,6 +161,9 @@ export function IconExpand() {
 // rail, which can end up far from the chart when the rail sits on the right.
 export function ChartHintBanner({ chartView, open, modelCount = 0 }) {
   const { t } = useTranslation();
+  // On touch the 3D chart rotates/zooms with two fingers (one finger scrolls
+  // the page) and has no right-click pan, so the mouse rows would be wrong.
+  const touch = useCoarsePointer();
   if (!open) return null;
 
   return (
@@ -194,28 +198,32 @@ export function ChartHintBanner({ chartView, open, modelCount = 0 }) {
               <circle cx="9" cy="7" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="9" cy="17" r="1" />
               <circle cx="15" cy="7" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="15" cy="17" r="1" />
             </svg>
-            {t('dashboard.controlRotate')}
+            {t(touch ? 'dashboard.controlRotateTouch' : 'dashboard.controlRotate')}
           </div>
-          <div className="dash-chart-hint-banner-row">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-              <line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" />
-            </svg>
-            {t('dashboard.controlZoom')}
-          </div>
-          <div className="dash-chart-hint-banner-row">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="5 9 2 12 5 15" /><polyline points="9 5 12 2 15 5" />
-              <polyline points="15 19 12 22 9 19" /><polyline points="19 9 22 12 19 15" />
-              <line x1="2" y1="12" x2="22" y2="12" /><line x1="12" y1="2" x2="12" y2="22" />
-            </svg>
-            {t('dashboard.controlPan')}
-          </div>
+          {!touch && (
+            <>
+            <div className="dash-chart-hint-banner-row">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                <line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" />
+              </svg>
+              {t('dashboard.controlZoom')}
+            </div>
+            <div className="dash-chart-hint-banner-row">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="5 9 2 12 5 15" /><polyline points="9 5 12 2 15 5" />
+                <polyline points="15 19 12 22 9 19" /><polyline points="19 9 22 12 19 15" />
+                <line x1="2" y1="12" x2="22" y2="12" /><line x1="12" y1="2" x2="12" y2="22" />
+              </svg>
+              {t('dashboard.controlPan')}
+            </div>
+            </>
+          )}
           <div className="dash-chart-hint-banner-row">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="9" cy="7" r="1" /><circle cx="15" cy="7" r="1" />
             </svg>
-            {t('dashboard.controlClick')}
+            {t(touch ? 'dashboard.controlClickTouch' : 'dashboard.controlClick')}
           </div>
         </>
       )}

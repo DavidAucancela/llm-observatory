@@ -302,6 +302,8 @@
     "controlZoom": "Desplaza para zoom",
     "controlPan": "Clic derecho para desplazar",
     "controlClick": "Clic en una barra para fijar el detalle",
+    "controlRotateTouch": "Dos dedos para rotar y hacer zoom",
+    "controlClickTouch": "Toca una barra para fijar el detalle",
     "view3D": "Vista 3D",
     "view2D": "Vista 2D",
     "resetView": "Restablecer vista",

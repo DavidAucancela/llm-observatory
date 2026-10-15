@@ -1126,6 +1126,11 @@ body {
 }
 .ms3d-wrap canvas { cursor: grab; }
 .ms3d-wrap canvas:active { cursor: grabbing; }
+/* OrbitControls sets an inline `touch-action: none` on its element; on touch
+   devices let one-finger vertical drags scroll the page (see FINGER_TOUCHES
+   in MetricSurface3D.jsx — two fingers still reach the controls). */
+.ms3d-wrap--touch,
+.ms3d-wrap--touch * { touch-action: pan-y !important; }
 
 .ms3d-fallback {
   width: 100%;

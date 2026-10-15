@@ -5,7 +5,15 @@ import { useTranslation } from 'react-i18next';
 import { readChartPalette, colorForModel } from '../utils/chartColors';
 import { modelProviderIndices } from '../utils/providerColors';
 import { buildGrid, formatMetricValue } from '../utils/metricGrid';
+import { useCoarsePointer } from '../hooks/useCoarsePointer';
 import * as THREE from 'three';
+
+// On touch, one finger must scroll the page — OrbitControls' default one-finger
+// rotate (plus its `touch-action: none`, overridden by .ms3d-wrap--touch in
+// index.css) trapped the whole dashboard under a finger landing on the chart.
+// Two fingers rotate + zoom instead; a tap still pins a bar.
+const MOUSE_TOUCHES = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+const FINGER_TOUCHES = { ONE: null, TWO: THREE.TOUCH.DOLLY_ROTATE };
 
 const BAR_SIZE = 0.62;
 const SPACING  = 0.9;
@@ -185,8 +193,10 @@ function Bar({ targetHeight, size, color, position, isActiveCell, dimmed, hasVal
     <mesh
       ref={meshRef}
       position={[position[0], 0, position[2]]}
-      onPointerOver={(e) => { e.stopPropagation(); onHover(); }}
-      onPointerOut={(e) => { e.stopPropagation(); onUnhover(); }}
+      // A tap fires pointerover but never a matching pointerout, so on touch
+      // the hover tooltip stuck on the last bar touched. Taps pin instead.
+      onPointerOver={(e) => { e.stopPropagation(); if (e.pointerType !== 'touch') onHover(); }}
+      onPointerOut={(e) => { e.stopPropagation(); if (e.pointerType !== 'touch') onUnhover(); }}
       onClick={(e) => { e.stopPropagation(); onClick(); }}
     >
       <boxGeometry args={[size, 1, size]} />
@@ -284,7 +294,7 @@ function pickLabelIndices(count) {
 // buildGrid trims leading/trailing empty buckets, every grid.hours index hi
 // must be offset by grid.labelOffset to land back on the right xLabels entry.
 // `?? ''` below is just a guard, not the real defense.
-function Scene({ grid, metric, xLabels, palette, gridSpan, cameraDistance, cameraYRatio, minCameraDistance, barSize, labelFontSize, controlsRef, frameRef, navGoalRef, orbitLocked, autoRotateOn, hovered, pinned, onHoverChange, onUnhoverChange, onPinToggle, hiddenModels, providerIndices }) {
+function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance, cameraYRatio, minCameraDistance, barSize, labelFontSize, controlsRef, frameRef, navGoalRef, orbitLocked, autoRotateOn, hovered, pinned, onHoverChange, onUnhoverChange, onPinToggle, hiddenModels, providerIndices }) {
   const { hours, models, values, rawValues, columnTotals, max, labelOffset } = grid;
   const [autoRotate, setAutoRotate] = useState(false);
   const autoRotateOnRef = useRef(autoRotateOn);
@@ -528,6 +538,7 @@ function Scene({ grid, metric, xLabels, palette, gridSpan, cameraDistance, camer
         ref={controlsRef}
         enablePan
         enableRotate={!orbitLocked}
+        touches={touch ? FINGER_TOUCHES : MOUSE_TOUCHES}
         autoRotate={autoRotate}
         autoRotateSpeed={AUTO_ROTATE_SPEED}
         onStart={pauseAutoRotate}
@@ -573,6 +584,7 @@ function MetricSurface3D({
 }, ref) {
   const { t } = useTranslation();
   const palette = useThemePalette();
+  const touch = useCoarsePointer();
   const webglOk = useMemo(() => checkWebGLSupport(), []);
   const controlsRef = useRef();
   // Populated by Scene with the live aspect-compensated framing (see
@@ -717,7 +729,7 @@ function MetricSurface3D({
   }
 
   return (
-    <div className="ms3d-wrap">
+    <div className={`ms3d-wrap${touch ? ' ms3d-wrap--touch' : ''}`}>
       <Canvas3DErrorBoundary fallback={<Unsupported3DFallback onSwitchTo2D={onSwitchTo2D} t={t} />}>
         <Canvas
           resize={{ scroll: false, debounce: 0 }}
@@ -727,6 +739,7 @@ function MetricSurface3D({
           onPointerMissed={() => setPinned(null)}
         >
           <Scene
+            touch={touch}
             grid={grid}
             metric={metric}
             xLabels={xLabels}
