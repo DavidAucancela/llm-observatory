@@ -512,7 +512,13 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   const axisLocale = i18n.language === 'es' ? 'es-ES' : 'en-US';
   const xLabels = timeSeries.map(r => {
     const d = new Date(r.hour);
-    if (bucketUnit === 'hour') return `${String(d.getHours()).padStart(2, '0')}:00`;
+    // Hour buckets are UTC hours shown in local time — with minutes, so a
+    // half-hour zone (India, +5:30) reads 05:30 instead of a wrong 05:00.
+    // Local midnight shows the date instead, marking where the day turns.
+    if (bucketUnit === 'hour') {
+      if (d.getHours() === 0 && d.getMinutes() === 0) return d.toLocaleDateString(axisLocale, { month: 'short', day: 'numeric' });
+      return d.toLocaleTimeString(axisLocale, { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
     if (bucketUnit === 'month') return d.toLocaleDateString(axisLocale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
     if (bucketUnit === 'week') return d.toLocaleDateString(axisLocale, { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' });
     return d.toLocaleDateString(axisLocale, { month: 'short', day: 'numeric', timeZone: 'UTC' });

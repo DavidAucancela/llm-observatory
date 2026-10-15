@@ -40,7 +40,7 @@ const SETTLE_EPSILON = 1e-3;
 // so front-row bars stop occluding back rows — see the isDense derivation (spanDays, not raw bucket count, since 24h
 // uses hourly buckets while 30d/90d use daily buckets).
 const DENSE_THRESHOLD = 14;
-const MAX_AXIS_LABELS = 7;
+const MAX_AXIS_LABELS = 9;
 // Axis label font size was a fixed 0.32 world units — fine at 7d (gridSpan
 // ~7), but the same absolute size reads as illegibly tiny once the camera
 // pulls back for 30d/90d (gridSpan up to ~80+), since the labels shrink
@@ -325,16 +325,30 @@ function CanvasTextSprite({ text, color, fontSize, position }) {
   );
 }
 
-// Picks up to MAX_AXIS_LABELS bucket indices to label on the floor: always
-// the first and last bucket, plus evenly-spaced steps between — avoids
-// rendering one label per bucket (unreadable clutter at 30d/90d).
-function pickLabelIndices(count) {
-  if (count <= 1) return [0].slice(0, count);
-  const step = Math.max(1, Math.ceil(count / (MAX_AXIS_LABELS - 1)));
-  const indices = new Set();
-  for (let i = 0; i < count; i += step) indices.add(i);
-  indices.add(count - 1);
-  return [...indices].sort((a, b) => a - b);
+// World-space width of a CanvasTextSprite label — mirrors its canvas math
+// (glyphs ~0.6em wide at weight 600, 0.25em padding each side, height
+// fontSize * 1.3) closely enough to keep neighbours from overlapping.
+function labelWorldWidth(text, fontSize) {
+  return fontSize * 1.3 * ((text.length * 0.6 + 0.5) / 1.5);
+}
+
+// Picks which buckets get a floor date label. The step is the smallest that
+// keeps the widest label clear of its neighbour (and at most MAX_AXIS_LABELS
+// labels), counted back from the newest bucket — the one people look for.
+// The oldest bucket is labeled too when it has room not to overlap: the old
+// version always forced both ends in, so e.g. 7d drew day 6 and day 7 on top
+// of each other. `focus` (a hovered/pinned column) is always labeled,
+// and labels that would collide with it drop out.
+function pickLabelIndices(count, labels, fontSize, focus = null) {
+  if (count <= 0) return [];
+  const widest = Math.max(...labels.map(l => labelWorldWidth(l, fontSize)), 0);
+  const minStep = Math.max(1, Math.ceil((widest * 1.15) / SPACING));
+  const step = Math.max(minStep, Math.ceil((count - 1) / (MAX_AXIS_LABELS - 1)));
+  const indices = [];
+  for (let i = count - 1; i >= 0; i -= step) indices.push(i);
+  if (indices[indices.length - 1] >= minStep) indices.push(0);
+  if (focus == null || focus < 0 || focus >= count) return indices.reverse();
+  return [...indices.filter(i => Math.abs(i - focus) >= minStep), focus].sort((a, b) => a - b);
 }
 
 // xLabels is indexed by the same position as the untrimmed bucket list —
@@ -521,7 +535,15 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
   // the edge facing the default front camera (FRONT_DIR), so they read in the
   // foreground instead of being occluded by the bar field.
   const labelZ = offsetZ + models.length * SPACING;
-  const labelIndices = pickLabelIndices(hours.length);
+  // Hover always previews on top of a pin (the mouse is literally over it);
+  // otherwise fall back to whatever's pinned.
+  const active = hovered || pinned;
+  const activeColumn = active ? Math.round((active.x - offsetX) / SPACING) : null;
+  const columnLabels = hours.map((_, hi) => xLabels[labelOffset + hi] ?? '');
+  const labelIndices = pickLabelIndices(hours.length, columnLabels, labelFontSize, activeColumn);
+  // Short floor ticks tie each date to its column: with the labels a row in
+  // front of the bar field, a date between two columns was hard to place.
+  const tickZ = offsetZ + (models.length - 0.5) * SPACING + 0.12;
 
   // Built once per data/theme change instead of two THREE.Color allocations
   // per bar per render (hover alone re-renders the whole field).
@@ -536,10 +558,6 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
       });
     });
   }, [values, max, providerIndices, palette.surface]);
-
-  // Hover always previews on top of a pin (the mouse is literally over it);
-  // otherwise fall back to whatever's pinned.
-  const active = hovered || pinned;
 
   return (
     <>
@@ -606,13 +624,18 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
         })
       ))}
       {labelIndices.map(hi => (
-        <CanvasTextSprite
-          key={hi}
-          text={xLabels[labelOffset + hi] ?? ''}
-          color={palette.text}
-          fontSize={labelFontSize}
-          position={[offsetX + hi * SPACING, 0.05, labelZ]}
-        />
+        <React.Fragment key={hi}>
+          <mesh position={[offsetX + hi * SPACING, 0.006, tickZ]}>
+            <boxGeometry args={[0.03, 0.01, 0.24]} />
+            <meshBasicMaterial color={hi === activeColumn ? palette.accent : palette.muted} />
+          </mesh>
+          <CanvasTextSprite
+            text={columnLabels[hi]}
+            color={hi === activeColumn ? palette.accent : palette.text}
+            fontSize={labelFontSize}
+            position={[offsetX + hi * SPACING, 0.05, labelZ]}
+          />
+        </React.Fragment>
       ))}
       {active && <FocusRing x={active.x} z={active.z} color={active.color} />}
       {active && (
