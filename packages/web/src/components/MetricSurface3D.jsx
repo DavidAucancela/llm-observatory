@@ -27,6 +27,15 @@ const MAX_HEIGHT = 3.6;
 // the true ratio) is what still communicates relative magnitude.
 const MIN_VISIBLE_HEIGHT = MAX_HEIGHT * 0.035;
 const DAMP_LAMBDA = 6;
+// The Canvas renders on demand (frameloop="demand"): nothing draws while the
+// scene is still, and anything animating calls invalidate() for its next
+// frame. The first frame after an idle stretch reports the whole idle time as
+// its delta, which would make every damp() jump straight to its target —
+// clamped so animations still ease in after a pause.
+const MAX_FRAME_DELTA = 1 / 30;
+// A damped value this close to its target counts as settled (stops asking
+// for frames).
+const SETTLE_EPSILON = 1e-3;
 // Above this many days of span (roughly the 30d/90d ranges), thin the bars
 // and flatten the camera angle so front-row bars stop occluding back rows —
 // see Scene's isDense derivation (spanDays, not raw bucket count, since 24h
@@ -173,20 +182,34 @@ function Bar({ targetHeight, size, color, position, isActiveCell, dimmed, hasVal
     currentHeight.current = 0.01;
   }, [revealStart]);
 
-  useFrame((_, delta) => {
+  useFrame((state, rawDelta) => {
+    const delta = Math.min(rawDelta, MAX_FRAME_DELTA);
     const revealed = performance.now() - revealStart >= revealDelay;
     const targetH = revealed ? Math.max(targetHeight, 0.01) : 0.01;
+    const targetLift = isActiveCell ? HOVER_LIFT : 0;
+    const targetOpacity = isActiveCell ? 1 : dimmed ? DIMMED_OPACITY : (hasValue ? 1 : EMPTY_OPACITY);
+    const targetEmissive = isActiveCell ? 0.6 : 0;
+    const material = materialRef.current;
+    // Settled bars skip the work and stop requesting frames — with ~500 bars
+    // on a 90d range, a still chart now costs nothing instead of a full
+    // render 60 times a second.
+    if (revealed && Math.abs(currentHeight.current - targetH) < SETTLE_EPSILON
+        && Math.abs(currentLift.current - targetLift) < SETTLE_EPSILON
+        && (!material || (Math.abs(material.opacity - targetOpacity) < SETTLE_EPSILON
+          && Math.abs(material.emissiveIntensity - targetEmissive) < SETTLE_EPSILON))) {
+      return;
+    }
     currentHeight.current = THREE.MathUtils.damp(currentHeight.current, targetH, DAMP_LAMBDA, delta);
-    currentLift.current = THREE.MathUtils.damp(currentLift.current, isActiveCell ? HOVER_LIFT : 0, DAMP_LAMBDA, delta);
+    currentLift.current = THREE.MathUtils.damp(currentLift.current, targetLift, DAMP_LAMBDA, delta);
     if (meshRef.current) {
       meshRef.current.scale.y = currentHeight.current;
       meshRef.current.position.y = currentHeight.current / 2 + currentLift.current;
     }
-    if (materialRef.current) {
-      const targetOpacity = isActiveCell ? 1 : dimmed ? DIMMED_OPACITY : (hasValue ? 1 : EMPTY_OPACITY);
-      materialRef.current.opacity = THREE.MathUtils.damp(materialRef.current.opacity, targetOpacity, DAMP_LAMBDA, delta);
-      materialRef.current.emissiveIntensity = THREE.MathUtils.damp(materialRef.current.emissiveIntensity, isActiveCell ? 0.6 : 0, DAMP_LAMBDA, delta);
+    if (material) {
+      material.opacity = THREE.MathUtils.damp(material.opacity, targetOpacity, DAMP_LAMBDA, delta);
+      material.emissiveIntensity = THREE.MathUtils.damp(material.emissiveIntensity, targetEmissive, DAMP_LAMBDA, delta);
     }
+    state.invalidate();
   });
 
   return (
@@ -219,10 +242,11 @@ function Bar({ targetHeight, size, color, position, isActiveCell, dimmed, hasVal
 // when the camera is auto-rotating.
 function FocusRing({ x, z, color }) {
   const ref = useRef();
-  useFrame(({ clock }) => {
+  useFrame(({ clock, invalidate }) => {
     if (!ref.current) return;
     const pulse = 1 + Math.sin(clock.elapsedTime * 3) * 0.08;
     ref.current.scale.set(pulse, pulse, 1);
+    invalidate(); // keeps pulsing only while a bar is focused
   });
   return (
     <mesh ref={ref} position={[x, 0.02, z]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -294,7 +318,7 @@ function pickLabelIndices(count) {
 // buildGrid trims leading/trailing empty buckets, every grid.hours index hi
 // must be offset by grid.labelOffset to land back on the right xLabels entry.
 // `?? ''` below is just a guard, not the real defense.
-function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance, cameraYRatio, minCameraDistance, barSize, labelFontSize, controlsRef, frameRef, navGoalRef, orbitLocked, autoRotateOn, hovered, pinned, onHoverChange, onUnhoverChange, onPinToggle, hiddenModels, providerIndices }) {
+function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance, cameraYRatio, minCameraDistance, barSize, labelFontSize, controlsRef, frameRef, navGoalRef, invalidateRef, orbitLocked, autoRotateOn, hovered, pinned, onHoverChange, onUnhoverChange, onPinToggle, hiddenModels, providerIndices }) {
   const { hours, models, values, rawValues, columnTotals, max, labelOffset } = grid;
   const [autoRotate, setAutoRotate] = useState(false);
   const autoRotateOnRef = useRef(autoRotateOn);
@@ -314,7 +338,13 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
       clearTimeout(idleTimerRef.current);
     }
   }, [autoRotateOn]);
-  const { size, camera } = useThree();
+  const { size, camera, invalidate } = useThree();
+  // Lets the imperative nav handlers (outside the Canvas) wake the on-demand
+  // loop after staging a navGoalRef.
+  if (invalidateRef) invalidateRef.current = invalidate;
+  // Any React-side change (hover, pin, palette, new data) needs a frame;
+  // the bars then keep requesting frames until they settle.
+  useEffect(() => { invalidate(); });
   const aspect = size.width / Math.max(size.height, 1);
   const aspectScale = aspect > 0 && aspect < REFERENCE_ASPECT
     ? Math.min(REFERENCE_ASPECT / aspect, MAX_ASPECT_COMPENSATION)
@@ -358,10 +388,12 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
       dollyGoalRef.current.position.set(effectiveCameraDistance * 0.7, effectiveCameraDistance * cameraYRatio, effectiveCameraDistance * 0.7);
     }
   }
-  useFrame((_, delta) => {
+  useFrame((state, rawDelta) => {
     if (performance.now() > dollyUntilRef.current) return;
     const controls = controlsRef.current;
     if (!controls) return;
+    const delta = Math.min(rawDelta, MAX_FRAME_DELTA);
+    state.invalidate();
     const { position: wantPosition, target: wantTarget } = dollyGoalRef.current;
     camera.position.set(
       THREE.MathUtils.damp(camera.position.x, wantPosition.x, DAMP_LAMBDA, delta),
@@ -381,12 +413,14 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
   // pattern as the pin dolly above: it only runs while performance.now() is
   // before goal.until, then clears itself so it never fights a subsequent
   // manual orbit/pan.
-  useFrame((_, delta) => {
+  useFrame((state, rawDelta) => {
     const goal = navGoalRef?.current;
     if (!goal) return;
     const controls = controlsRef.current;
     if (!controls) return;
     if (performance.now() > goal.until) { navGoalRef.current = null; return; }
+    const delta = Math.min(rawDelta, MAX_FRAME_DELTA);
+    state.invalidate();
     camera.position.set(
       THREE.MathUtils.damp(camera.position.x, goal.position.x, DAMP_LAMBDA, delta),
       THREE.MathUtils.damp(camera.position.y, goal.position.y, DAMP_LAMBDA, delta),
@@ -417,6 +451,10 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
     return () => clearTimeout(idleTimerRef.current);
   }, []);
 
+  // OrbitControls advances autoRotate inside its own update(), which only
+  // runs on rendered frames — keep frames coming while it's spinning.
+  useFrame((state) => { if (autoRotate) state.invalidate(); });
+
   // Keep rotation paused for as long as a tooltip is pinned open, regardless
   // of whether OrbitControls itself fired a start/end (a plain click may not).
   useEffect(() => {
@@ -442,6 +480,20 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
   // occluded by the bar field.
   const labelZ = offsetZ + models.length * SPACING;
   const labelIndices = pickLabelIndices(hours.length);
+
+  // Built once per data/theme change instead of two THREE.Color allocations
+  // per bar per render (hover alone re-renders the whole field).
+  const barColors = useMemo(() => {
+    const surface = new THREE.Color(palette.surface);
+    return values.map((row, mi) => {
+      const { provider, index } = providerIndices[mi];
+      const base = new THREE.Color(colorForModel(provider, index, { forThreeJs: true }));
+      return row.map(value => {
+        const ratio = value / max;
+        return base.clone().lerp(surface, value > 0 ? (1 - ratio) * 0.45 : 0.78);
+      });
+    });
+  }, [values, max, providerIndices, palette.surface]);
 
   // Hover always previews on top of a pin (the mouse is literally over it);
   // otherwise fall back to whatever's pinned.
@@ -487,9 +539,8 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
           // toward the scene surface color, so magnitude reads through color
           // as well as height. Zero-value cells fade much further — they're a
           // placeholder marker, not a real (if small) data point.
-          const { provider, index } = providerIndices[mi];
-          const barColor = new THREE.Color(colorForModel(provider, index, { forThreeJs: true }))
-            .lerp(new THREE.Color(palette.surface), hasValue ? (1 - ratio) * 0.45 : 0.78);
+          const { provider } = providerIndices[mi];
+          const barColor = barColors[mi][hi];
           const cellInfo = { key, model, provider, hour: xLabels[labelOffset + hi] ?? '', value, x, z, height, color: barColor, raw: rawValues[mi][hi], bucketTotal: columnTotals?.[hi], metric };
           const isActiveCell = !!active && active.key === key;
           const isActiveRow = !!active && active.model === model;
@@ -599,6 +650,8 @@ function MetricSurface3D({
   // Staged by the camera-control handlers (exposed via ref), consumed by
   // Scene's fly-to useFrame.
   const navGoalRef = useRef(null);
+  const invalidateRef = useRef(null);
+  const setNavGoal = (goal) => { navGoalRef.current = goal; invalidateRef.current?.(); };
 
   // The pinned/hovered cell references a specific grid coordinate (`mi-hi`) and
   // caches that cell's values at pin time. When the grid's shape changes — a
@@ -689,7 +742,7 @@ function MetricSurface3D({
       case 'side':  position = new THREE.Vector3(d * 0.98, d * 0.32, 0); break;
       default:      position = new THREE.Vector3(d * 0.7, d * yRatio, d * 0.7); break; // iso / 3-quarter
     }
-    navGoalRef.current = { position, target, until: performance.now() + 700 };
+    setNavGoal({ position, target, until: performance.now() + 700 });
   };
 
   const nudgeZoom = (factor) => {
@@ -699,7 +752,7 @@ function MetricSurface3D({
     const offset = c.object.position.clone().sub(target);
     const maxLen = framing().distance * 1.8;
     const len = THREE.MathUtils.clamp(offset.length() * factor, minCameraDistance, maxLen);
-    navGoalRef.current = { position: target.clone().add(offset.setLength(len)), target, until: performance.now() + 450 };
+    setNavGoal({ position: target.clone().add(offset.setLength(len)), target, until: performance.now() + 450 });
   };
 
   const nudgeRotate = (radians) => {
@@ -707,7 +760,7 @@ function MetricSurface3D({
     if (!c) return;
     const target = c.target.clone();
     const offset = c.object.position.clone().sub(target).applyAxisAngle(new THREE.Vector3(0, 1, 0), radians);
-    navGoalRef.current = { position: target.clone().add(offset), target, until: performance.now() + 550 };
+    setNavGoal({ position: target.clone().add(offset), target, until: performance.now() + 550 });
   };
 
   useImperativeHandle(ref, () => ({ flyToView, nudgeZoom, nudgeRotate, resetView }));
@@ -732,6 +785,7 @@ function MetricSurface3D({
     <div className={`ms3d-wrap${touch ? ' ms3d-wrap--touch' : ''}`}>
       <Canvas3DErrorBoundary fallback={<Unsupported3DFallback onSwitchTo2D={onSwitchTo2D} t={t} />}>
         <Canvas
+          frameloop="demand"
           resize={{ scroll: false, debounce: 0 }}
           dpr={[1, 2]}
           gl={{ alpha: true }}
@@ -753,6 +807,7 @@ function MetricSurface3D({
             controlsRef={controlsRef}
             frameRef={frameRef}
             navGoalRef={navGoalRef}
+            invalidateRef={invalidateRef}
             orbitLocked={orbitLocked}
             autoRotateOn={autoRotateOn}
             hovered={hovered}
