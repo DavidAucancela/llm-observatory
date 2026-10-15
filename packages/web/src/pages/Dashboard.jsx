@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import ProviderBadge from '../components/ProviderBadge';
 import Sparkline from '../components/Sparkline';
 import HBar from '../components/HBar';
@@ -12,14 +13,15 @@ import { useRangeFilter } from '../hooks/useRangeFilter';
 import { formatCost, fmtLatency, fmtDateShort } from '../utils/fmt';
 import { RANGE_PRESETS, buildRangeParams, todayUtc } from '../utils/dateRange';
 import { buildGrid } from '../utils/metricGrid';
+import { readPref, writePref } from '../utils/storage';
 import { PROVIDER_COLORS } from '../utils/providerColors';
 import { shortModelName } from '../utils/modelAlias';
 
 // three.js + @react-three/fiber/drei add ~800KB minified — lazy-load so the
 // bundle for every other route stays light; only the Dashboard route pays for it.
 const MetricSurface3D = lazy(() => import('../components/MetricSurface3D'));
-// recharts is also lazy-loaded so a user who stays on the (default) 3D view
-// never pays for it — only fetched once they switch to the 2D view.
+// recharts is lazy-loaded too, so each view only pays for its own chart
+// library — 2D is the default (see chartView below), 3D loads on switch.
 const ModelTrendChart2D = lazy(() => import('../components/ModelTrendChart2D'));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -115,6 +117,7 @@ function ReconciliationBadge({ run }) {
 }
 
 function ProviderBreakdown({ byProvider, loading, reconciliation }) {
+  const { t } = useTranslation();
   if (loading) return <div className="obs-skeleton" style={{ height: 90, borderRadius: 6 }} />;
   if (!byProvider.length) return (
     <div style={{ fontSize: 12, color: 'var(--muted)', padding: '16px 0' }}>—</div>
@@ -146,7 +149,7 @@ function ProviderBreakdown({ byProvider, loading, reconciliation }) {
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, fontSize: 11, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
                 <span style={{ fontSize: 10, textAlign: 'right', display: 'inline-block' }}>{formatCost(cost)}</span>
                 <span style={{ width: 32, textAlign: 'right', display: 'inline-block' }}>{pct.toFixed(0)}%</span>
-                <span style={{ color: 'var(--text)', fontWeight: 500, width: 58, textAlign: 'right', display: 'inline-block' }}>{reqs.toLocaleString()} req</span>
+                <span style={{ color: 'var(--text)', fontWeight: 500, width: 58, textAlign: 'right', display: 'inline-block' }}>{reqs.toLocaleString()} {t('dashboard.reqUnit')}</span>
               </div>
             </div>
             <div className="iprog-bar" style={{ height: 5, borderRadius: 3 }}>
@@ -311,7 +314,7 @@ function TagBreakdown({ rangeParams, className = '' }) {
           {data.map(row => (
             <HBar
               key={row.value}
-              label={String(row.value ?? '(empty)')}
+              label={String(row.value ?? t('dashboard.tagEmptyValue'))}
               value={parseFloat(row.total_cost || 0)}
               max={maxCost}
               color="var(--accent)"
@@ -412,11 +415,14 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   const { range, setRange, customRange, setCustomRange } = useRangeFilter('7d');
   const [summary, setSummary]     = useState(null);
   const [loading, setLoading]     = useState(true);
+  // The summary request failed (non-2xx or network). Without this a 500 left
+  // an empty dashboard with no hint anything was wrong.
+  const [loadError, setLoadError] = useState(false);
   const [hasCredentials, setHasCredentials] = useState(true);
   const [configuredProviders, setConfiguredProviders] = useState([]);
   const [reconciliation, setReconciliation] = useState([]);
   const [activeMetric, setActiveMetric] = useState('tokens');
-  const [chartView, setChartView] = useState(() => localStorage.getItem('obs-chart-view') || '2d');
+  const [chartView, setChartView] = useState(() => readPref('obs-chart-view') || '2d');
   // Client-side-only visual toggle for which models' bars/lines are shown in
   // the chart. Not persisted: it's meant to be a lightweight, session-only declutter, same
   // as the toggle recharts' own <Legend> used to provide for the 2D view only.
@@ -426,7 +432,7 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   // only, no localStorage: it's a scroll-depth aid, not a durable preference.
   const [mobileTab, setMobileTab] = useState('overview');
   const [toolbarCollapsed, setToolbarCollapsed] = useState(
-    () => localStorage.getItem('obs-chart-toolbar-collapsed') === 'true'
+    () => readPref('obs-chart-toolbar-collapsed') === 'true'
   );
   // Usage-hint banner shown along the bottom of the chart plot (not a popover
   // in the rail — see ChartHintBanner). Session-only, no localStorage.
@@ -441,7 +447,7 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   // 2D-only, additive metrics only (requests/tokens/cost) — see ChartToolbar's
   // showCompare prop below for where the restriction is enforced.
   const [comparePrev, setComparePrev] = useState(
-    () => localStorage.getItem('obs-chart-compare-prev') === 'true'
+    () => readPref('obs-chart-compare-prev') === 'true'
   );
   const { on, off } = useSocket();
   const { apiFetch }  = useApi();
@@ -457,9 +463,14 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
     const seq = ++fetchSeq.current;
     if (!silent) setLoading(true);
     try {
-      const sum = await (await apiFetch(`/api/metrics/summary?${rangeQuery}`)).json();
-      if (seq === fetchSeq.current) setSummary(sum);
-    } catch (err) { console.error(err); }
+      const res = await apiFetch(`/api/metrics/summary?${rangeQuery}`);
+      if (!res.ok) throw new Error(`summary ${res.status}`);
+      const sum = await res.json();
+      if (seq === fetchSeq.current) { setSummary(sum); setLoadError(false); }
+    } catch (err) {
+      console.error(err);
+      if (seq === fetchSeq.current) setLoadError(true);
+    }
     finally { if (seq === fetchSeq.current) setLoading(false); }
   }, [rangeQuery]);
 
@@ -548,7 +559,13 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   const axisLocale = i18n.language === 'es' ? 'es-ES' : 'en-US';
   const xLabels = timeSeries.map(r => {
     const d = new Date(r.hour);
-    if (bucketUnit === 'hour') return `${String(d.getHours()).padStart(2, '0')}:00`;
+    // Hour buckets are UTC hours shown in local time — with minutes, so a
+    // half-hour zone (India, +5:30) reads 05:30 instead of a wrong 05:00.
+    // Local midnight shows the date instead, marking where the day turns.
+    if (bucketUnit === 'hour') {
+      if (d.getHours() === 0 && d.getMinutes() === 0) return d.toLocaleDateString(axisLocale, { month: 'short', day: 'numeric' });
+      return d.toLocaleTimeString(axisLocale, { hour: '2-digit', minute: '2-digit', hour12: false });
+    }
     if (bucketUnit === 'month') return d.toLocaleDateString(axisLocale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
     if (bucketUnit === 'week') return d.toLocaleDateString(axisLocale, { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' });
     return d.toLocaleDateString(axisLocale, { month: 'short', day: 'numeric', timeZone: 'UTC' });
@@ -599,7 +616,7 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
 
   const toggleToolbarCollapsed = () => setToolbarCollapsed(prev => {
     const next = !prev;
-    localStorage.setItem('obs-chart-toolbar-collapsed', String(next));
+    writePref('obs-chart-toolbar-collapsed', String(next));
     // Collapsing hides the hint trigger button itself, so leaving the banner
     // open would strand it with no way to close it short of re-expanding.
     if (next) setChartHintOpen(false);
@@ -624,7 +641,7 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
 
   const toggleComparePrev = () => setComparePrev(prev => {
     const next = !prev;
-    localStorage.setItem('obs-chart-compare-prev', String(next));
+    writePref('obs-chart-compare-prev', String(next));
     return next;
   });
 
@@ -661,9 +678,9 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
             </div>
             <div className="obs-empty-title">{t('dashboard.noKeysTitle')}</div>
             <div className="obs-empty-sub">{t('dashboard.noKeysSub')}</div>
-            <a href="/settings" className="obs-btn obs-btn-primary" style={{ marginTop: 16, textDecoration: 'none' }}>
+            <Link to="/keys" className="obs-btn obs-btn-primary" style={{ marginTop: 16, textDecoration: 'none' }}>
               {t('dashboard.addKeyButton')}
-            </a>
+            </Link>
           </div>
         </div>
       </main>
@@ -686,6 +703,12 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
       <CoverageBanner rangeParams={rangeParams} />
 
       <div className="obs-content dash-content">
+        {loadError && (
+          <div className="dash-load-error" role="alert">
+            <span>{t('dashboard.loadError')}</span>
+            <button type="button" className="obs-btn" onClick={() => fetchSummary()}>{t('dashboard.retry')}</button>
+          </div>
+        )}
         {/* Chart spans the full content width; the toolbar is a vertical rail on
             its right edge (row-reverse in CSS — this stays the first DOM child
             so mobile, which switches to flex-direction:column, keeps it on top
@@ -703,7 +726,7 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
             onIsolateModel={isolateModel}
             modelToProvider={modelToProvider}
             chartView={chartView}
-            onSetChartView={(v) => { setChartView(v); localStorage.setItem('obs-chart-view', v); }}
+            onSetChartView={(v) => { setChartView(v); writePref('obs-chart-view', v); }}
             collapsed={toolbarCollapsed}
             onToggleCollapsed={toggleToolbarCollapsed}
             hintOpen={chartHintOpen}
@@ -713,7 +736,6 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
             onToggleCompare={toggleComparePrev}
             compareDelta={compareDelta}
             chart3d={chartView === '3d' ? {
-              onView: (kind) => surface3dRef.current?.flyToView(kind),
               onRotate: (radians) => surface3dRef.current?.nudgeRotate(radians),
               onZoom: (factor) => surface3dRef.current?.nudgeZoom(factor),
               onReset: () => surface3dRef.current?.resetView(),
@@ -737,7 +759,7 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
                   otherModels={otherModels}
                   orbitLocked={orbitLocked}
                   autoRotateOn={autoRotateOn}
-                  onSwitchTo2D={() => { setChartView('2d'); localStorage.setItem('obs-chart-view', '2d'); }}
+                  onSwitchTo2D={() => { setChartView('2d'); writePref('obs-chart-view', '2d'); }}
                 />
               ) : (
                 <ModelTrendChart2D
@@ -851,7 +873,7 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
             <div className="dash-card-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
               <div>
                 <div className="obs-section-label">{t('dashboard.topModels')}</div>
-                <div style={{ fontSize: 10, color: 'var(--faint)', marginTop: 2 }}>sorted by cost</div>
+                <div style={{ fontSize: 10, color: 'var(--faint)', marginTop: 2 }}>{t('dashboard.topModelsSub')}</div>
               </div>
               <div style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', gap: 14, flexShrink: 0, whiteSpace: 'nowrap' }}>
                 <span>{t('dashboard.cost')}</span>
