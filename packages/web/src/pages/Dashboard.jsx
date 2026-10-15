@@ -337,7 +337,13 @@ function RangeSpend({ byProvider, totalCost, prevTotalCost, range, customRange, 
   if (loading) return <div className="obs-skeleton" style={{ height: 120, borderRadius: 6 }} />;
 
   const items = (byProvider || []).filter(p => configuredProviders.includes(p.provider));
-  if (!items.length) return null;
+  // On desktop an empty band is simply omitted, but on mobile this is the
+  // whole "Resumen" tab — returning null left the tab blank (e.g. SDK-only
+  // orgs with no admin key, or a range with no spend). The placeholder is
+  // mobile-only (.dash-range-spend-empty in index.css).
+  if (!items.length) {
+    return <div className={`obs-card dash-range-spend-empty ${className}`}>{t('dashboard.rangeSpendEmpty')}</div>;
+  }
 
   const total = parseFloat(totalCost || 0);
   const rangeLabel = range === 'custom'

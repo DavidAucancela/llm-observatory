@@ -1186,6 +1186,10 @@ body {
   border-radius: 10px;
   box-shadow: var(--shadow-md);
   padding: 12px;
+  /* The wrap clips (overflow: hidden), and with cache tokens + the "other
+     models" list the card outgrew short charts — scroll inside it instead. */
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
   animation: ms3d-summary-in 0.22s ease-out;
 }
 @keyframes ms3d-summary-in {
@@ -1299,6 +1303,15 @@ body {
   margin-top: 4px;
 }
 
+/* Mobile-only placeholder (see RangeSpend); the desktop band just omits itself. */
+.dash-range-spend-empty { display: none; }
+
+/* Touch: rotate/zoom are two-finger gestures on the canvas, so the step
+   buttons only cost rail height there. View presets and lock/auto-rotate stay. */
+@media (pointer: coarse) {
+  .dash-chart-rail-3d-row:not(.dash-chart-rail-3d-row--trio) { display: none; }
+}
+
 .chart2d-tooltip {
   background: var(--surface-raised, var(--surface));
   border: 1px solid var(--border);
@@ -1319,6 +1332,11 @@ body {
   white-space: nowrap;
 }
 .chart2d-tooltip-row + .chart2d-tooltip-row { margin-top: 3px; }
+.chart2d-tooltip-more {
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 4px;
+}
 .chart2d-tooltip-dot {
   width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0;
 }
@@ -2433,7 +2451,9 @@ body {
     flex-wrap: wrap;
     transition: max-height 0.22s cubic-bezier(0.4, 0, 0.2, 1), padding 0.22s cubic-bezier(0.4, 0, 0.2, 1),
                 opacity 0.16s ease, border-color 0.22s ease;
-    max-height: 300px;
+    /* Only a ceiling for the collapse transition — 300px clipped the 3D
+       controls (title + legend + three control rows) into an inner scroll. */
+    max-height: 640px;
   }
   /* The rail is a horizontal bar here, so the collapse dimension flips from
      width (desktop) to max-height. */
@@ -2469,7 +2489,26 @@ body {
   /* Dashboard: mobile-only section tabs (hidden entirely on desktop, where
      .dash-cards-grid's auto-fit already reflows every card into view). */
   .dash-mobile-tabbar { display: flex; }
+  .dash-range-spend-empty {
+    display: block;
+    padding: 16px;
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+  }
   .dash-mobile-tab-hidden { display: none; }
+  /* Docked card becomes a bottom sheet across the chart: 190px in a corner
+     covered most of a phone-width plot anyway, and read cramped. */
+  .ms3d-summary-card {
+    top: auto;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
+    max-height: 60%;
+  }
+  .chart2d-tooltip { max-width: 220px; }
+  .chart2d-tooltip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .dash-chart-rail-foot {
     flex-direction: row;
     flex-wrap: wrap;
