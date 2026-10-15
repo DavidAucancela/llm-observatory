@@ -92,12 +92,6 @@ function Chart3DControls({ chart3d, collapsed, t }) {
   return (
     <div className="dash-chart-rail-section dash-chart-rail-3d" role="group" aria-label={t('dashboard.nav3dLabel')}>
       <div className="obs-section-label dash-chart-rail-section-label">{t('dashboard.nav3dShort')}</div>
-      <div className="dash-chart-rail-3d-views">
-        <button type="button" tabIndex={tab} onClick={() => chart3d.onView('iso')} title={t('dashboard.view3dIso')}>{t('dashboard.view3dIsoShort')}</button>
-        <button type="button" tabIndex={tab} onClick={() => chart3d.onView('front')} title={t('dashboard.view3dFront')}>{t('dashboard.view3dFrontShort')}</button>
-        <button type="button" tabIndex={tab} onClick={() => chart3d.onView('top')} title={t('dashboard.view3dTop')}>{t('dashboard.view3dTopShort')}</button>
-        <button type="button" tabIndex={tab} onClick={() => chart3d.onView('side')} title={t('dashboard.view3dSide')}>{t('dashboard.view3dSideShort')}</button>
-      </div>
       <div className="dash-chart-rail-3d-row">
         <button type="button" tabIndex={tab} onClick={() => chart3d.onRotate(Math.PI / 4)} title={t('dashboard.rotateLeft')} aria-label={t('dashboard.rotateLeft')}><IconRotateLeft /></button>
         <button type="button" tabIndex={tab} onClick={() => chart3d.onRotate(-Math.PI / 4)} title={t('dashboard.rotateRight')} aria-label={t('dashboard.rotateRight')}><IconRotateRight /></button>
@@ -187,12 +181,6 @@ export function ChartHintBanner({ chartView, open, modelCount = 0 }) {
       )}
       {chartView === '3d' && (
         <>
-          <div className="dash-chart-hint-banner-row">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2 2 7l10 5 10-5-10-5Z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
-            </svg>
-            {t('dashboard.controlViews')}
-          </div>
           <div className="dash-chart-hint-banner-row">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="9" cy="7" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="9" cy="17" r="1" />

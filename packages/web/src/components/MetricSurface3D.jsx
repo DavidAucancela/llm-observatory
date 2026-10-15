@@ -27,12 +27,20 @@ const MAX_HEIGHT = 3.6;
 // the true ratio) is what still communicates relative magnitude.
 const MIN_VISIBLE_HEIGHT = MAX_HEIGHT * 0.035;
 const DAMP_LAMBDA = 6;
+// The Canvas renders on demand (frameloop="demand"): nothing draws while the
+// scene is still, and anything animating calls invalidate() for its next
+// frame. The first frame after an idle stretch reports the whole idle time as
+// its delta, which would make every damp() jump straight to its target —
+// clamped so animations still ease in after a pause.
+const MAX_FRAME_DELTA = 1 / 30;
+// A damped value this close to its target counts as settled (stops asking
+// for frames).
+const SETTLE_EPSILON = 1e-3;
 // Above this many days of span (roughly the 30d/90d ranges), thin the bars
-// and flatten the camera angle so front-row bars stop occluding back rows —
-// see Scene's isDense derivation (spanDays, not raw bucket count, since 24h
+// so front-row bars stop occluding back rows — see the isDense derivation (spanDays, not raw bucket count, since 24h
 // uses hourly buckets while 30d/90d use daily buckets).
 const DENSE_THRESHOLD = 14;
-const MAX_AXIS_LABELS = 7;
+const MAX_AXIS_LABELS = 9;
 // Axis label font size was a fixed 0.32 world units — fine at 7d (gridSpan
 // ~7), but the same absolute size reads as illegibly tiny once the camera
 // pulls back for 30d/90d (gridSpan up to ~80+), since the labels shrink
@@ -75,7 +83,7 @@ function densityFraming(spanDays) {
     minDist: Math.max(2.5, lerp(DENSITY_ANCHOR_LOW.minDist, DENSITY_ANCHOR_HIGH.minDist)),
   };
 }
-// cameraDistance/cameraYRatio are tuned against the desktop chart box, which
+// cameraDistance is tuned against the desktop chart box, which
 // is wide and short (rail beside the plot). On mobile the box goes nearly
 // square (rail moves above the plot, height fixed at 340px) — with a fixed
 // vertical FOV, a narrower aspect ratio means a narrower horizontal FOV too,
@@ -86,6 +94,33 @@ function densityFraming(spanDays) {
 // roughly consistent. Capped so extremely narrow phones don't zoom out so far
 // the bars become illegibly small.
 const REFERENCE_ASPECT = 2.2;
+// Default view: from the front, raised ~31° so the rows behind the front one
+// and the bar tops read (the first cut, ~18°, looked nearly edge-on), and
+// close enough that the bar field fills the frame. The old default was a
+// 3/4 corner view from cameraDistance, tuned to leave room around the grid —
+// it opened looking at the chart from the side and far away.
+const FRONT_DIR = new THREE.Vector3(0, 0.6, 0.98).normalize();
+const VIEW_TARGET = new THREE.Vector3(0, MAX_HEIGHT / 3, 0);
+// Breathing room around the bar field when fitting it to the frame.
+const FIT_MARGIN = 1.08;
+
+// Distance along FRONT_DIR at which the whole bar field (all columns wide, the
+// tallest bar high) fits a camera with this vertical FOV and aspect. Measured
+// to the grid's center plane, plus half its depth so the front row and the
+// axis labels in front of it fit too.
+function frontFitDistance({ columns, rows, fov, aspect }) {
+  const tanV = Math.tan(THREE.MathUtils.degToRad(fov / 2));
+  const tanH = tanV * Math.max(aspect, 0.1);
+  const width = Math.max(columns, 1) * SPACING;
+  const depth = (Math.max(rows, 1) + 1) * SPACING;
+  const byWidth = (width / 2) / tanH;
+  const byHeight = (MAX_HEIGHT - VIEW_TARGET.y + 0.4) / tanV;
+  return Math.max(byWidth, byHeight) * FIT_MARGIN + depth / 2;
+}
+
+function frontPosition(distance) {
+  return VIEW_TARGET.clone().addScaledVector(FRONT_DIR, distance);
+}
 const MAX_ASPECT_COMPENSATION = 1.6;
 // Idle time before the camera resumes auto-rotating after a drag/zoom/pan,
 // a bar hover, or a pinned tooltip — long enough to read a tooltip without
@@ -173,20 +208,34 @@ function Bar({ targetHeight, size, color, position, isActiveCell, dimmed, hasVal
     currentHeight.current = 0.01;
   }, [revealStart]);
 
-  useFrame((_, delta) => {
+  useFrame((state, rawDelta) => {
+    const delta = Math.min(rawDelta, MAX_FRAME_DELTA);
     const revealed = performance.now() - revealStart >= revealDelay;
     const targetH = revealed ? Math.max(targetHeight, 0.01) : 0.01;
+    const targetLift = isActiveCell ? HOVER_LIFT : 0;
+    const targetOpacity = isActiveCell ? 1 : dimmed ? DIMMED_OPACITY : (hasValue ? 1 : EMPTY_OPACITY);
+    const targetEmissive = isActiveCell ? 0.6 : 0;
+    const material = materialRef.current;
+    // Settled bars skip the work and stop requesting frames — with ~500 bars
+    // on a 90d range, a still chart now costs nothing instead of a full
+    // render 60 times a second.
+    if (revealed && Math.abs(currentHeight.current - targetH) < SETTLE_EPSILON
+        && Math.abs(currentLift.current - targetLift) < SETTLE_EPSILON
+        && (!material || (Math.abs(material.opacity - targetOpacity) < SETTLE_EPSILON
+          && Math.abs(material.emissiveIntensity - targetEmissive) < SETTLE_EPSILON))) {
+      return;
+    }
     currentHeight.current = THREE.MathUtils.damp(currentHeight.current, targetH, DAMP_LAMBDA, delta);
-    currentLift.current = THREE.MathUtils.damp(currentLift.current, isActiveCell ? HOVER_LIFT : 0, DAMP_LAMBDA, delta);
+    currentLift.current = THREE.MathUtils.damp(currentLift.current, targetLift, DAMP_LAMBDA, delta);
     if (meshRef.current) {
       meshRef.current.scale.y = currentHeight.current;
       meshRef.current.position.y = currentHeight.current / 2 + currentLift.current;
     }
-    if (materialRef.current) {
-      const targetOpacity = isActiveCell ? 1 : dimmed ? DIMMED_OPACITY : (hasValue ? 1 : EMPTY_OPACITY);
-      materialRef.current.opacity = THREE.MathUtils.damp(materialRef.current.opacity, targetOpacity, DAMP_LAMBDA, delta);
-      materialRef.current.emissiveIntensity = THREE.MathUtils.damp(materialRef.current.emissiveIntensity, isActiveCell ? 0.6 : 0, DAMP_LAMBDA, delta);
+    if (material) {
+      material.opacity = THREE.MathUtils.damp(material.opacity, targetOpacity, DAMP_LAMBDA, delta);
+      material.emissiveIntensity = THREE.MathUtils.damp(material.emissiveIntensity, targetEmissive, DAMP_LAMBDA, delta);
     }
+    state.invalidate();
   });
 
   return (
@@ -219,10 +268,11 @@ function Bar({ targetHeight, size, color, position, isActiveCell, dimmed, hasVal
 // when the camera is auto-rotating.
 function FocusRing({ x, z, color }) {
   const ref = useRef();
-  useFrame(({ clock }) => {
+  useFrame(({ clock, invalidate }) => {
     if (!ref.current) return;
     const pulse = 1 + Math.sin(clock.elapsedTime * 3) * 0.08;
     ref.current.scale.set(pulse, pulse, 1);
+    invalidate(); // keeps pulsing only while a bar is focused
   });
   return (
     <mesh ref={ref} position={[x, 0.02, z]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -275,16 +325,30 @@ function CanvasTextSprite({ text, color, fontSize, position }) {
   );
 }
 
-// Picks up to MAX_AXIS_LABELS bucket indices to label on the floor: always
-// the first and last bucket, plus evenly-spaced steps between — avoids
-// rendering one label per bucket (unreadable clutter at 30d/90d).
-function pickLabelIndices(count) {
-  if (count <= 1) return [0].slice(0, count);
-  const step = Math.max(1, Math.ceil(count / (MAX_AXIS_LABELS - 1)));
-  const indices = new Set();
-  for (let i = 0; i < count; i += step) indices.add(i);
-  indices.add(count - 1);
-  return [...indices].sort((a, b) => a - b);
+// World-space width of a CanvasTextSprite label — mirrors its canvas math
+// (glyphs ~0.6em wide at weight 600, 0.25em padding each side, height
+// fontSize * 1.3) closely enough to keep neighbours from overlapping.
+function labelWorldWidth(text, fontSize) {
+  return fontSize * 1.3 * ((text.length * 0.6 + 0.5) / 1.5);
+}
+
+// Picks which buckets get a floor date label. The step is the smallest that
+// keeps the widest label clear of its neighbour (and at most MAX_AXIS_LABELS
+// labels), counted back from the newest bucket — the one people look for.
+// The oldest bucket is labeled too when it has room not to overlap: the old
+// version always forced both ends in, so e.g. 7d drew day 6 and day 7 on top
+// of each other. `focus` (a hovered/pinned column) is always labeled,
+// and labels that would collide with it drop out.
+function pickLabelIndices(count, labels, fontSize, focus = null) {
+  if (count <= 0) return [];
+  const widest = Math.max(...labels.map(l => labelWorldWidth(l, fontSize)), 0);
+  const minStep = Math.max(1, Math.ceil((widest * 1.15) / SPACING));
+  const step = Math.max(minStep, Math.ceil((count - 1) / (MAX_AXIS_LABELS - 1)));
+  const indices = [];
+  for (let i = count - 1; i >= 0; i -= step) indices.push(i);
+  if (indices[indices.length - 1] >= minStep) indices.push(0);
+  if (focus == null || focus < 0 || focus >= count) return indices.reverse();
+  return [...indices.filter(i => Math.abs(i - focus) >= minStep), focus].sort((a, b) => a - b);
 }
 
 // xLabels is indexed by the same position as the untrimmed bucket list —
@@ -294,7 +358,7 @@ function pickLabelIndices(count) {
 // buildGrid trims leading/trailing empty buckets, every grid.hours index hi
 // must be offset by grid.labelOffset to land back on the right xLabels entry.
 // `?? ''` below is just a guard, not the real defense.
-function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance, cameraYRatio, minCameraDistance, barSize, labelFontSize, controlsRef, frameRef, navGoalRef, orbitLocked, autoRotateOn, hovered, pinned, onHoverChange, onUnhoverChange, onPinToggle, hiddenModels, providerIndices }) {
+function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance, minCameraDistance, barSize, labelFontSize, controlsRef, frameRef, navGoalRef, invalidateRef, orbitLocked, autoRotateOn, hovered, pinned, onHoverChange, onUnhoverChange, onPinToggle, hiddenModels, providerIndices }) {
   const { hours, models, values, rawValues, columnTotals, max, labelOffset } = grid;
   const [autoRotate, setAutoRotate] = useState(false);
   const autoRotateOnRef = useRef(autoRotateOn);
@@ -314,23 +378,47 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
       clearTimeout(idleTimerRef.current);
     }
   }, [autoRotateOn]);
-  const { size, camera } = useThree();
+  const { size, camera, invalidate } = useThree();
+  // Lets the imperative nav handlers (outside the Canvas) wake the on-demand
+  // loop after staging a navGoalRef.
+  if (invalidateRef) invalidateRef.current = invalidate;
+  // Any React-side change (hover, pin, palette, new data) needs a frame;
+  // the bars then keep requesting frames until they settle.
+  useEffect(() => { invalidate(); });
   const aspect = size.width / Math.max(size.height, 1);
   const aspectScale = aspect > 0 && aspect < REFERENCE_ASPECT
     ? Math.min(REFERENCE_ASPECT / aspect, MAX_ASPECT_COMPENSATION)
     : 1;
   const effectiveCameraDistance = cameraDistance * aspectScale;
+  // The front view's own distance comes from the real frame (aspect, FOV), so
+  // it fills the chart on a wide desktop box and on a near-square phone alike.
+  // Never farther than the old framing, though: fitting all 90 daily columns
+  // across a phone would pull back ~1.5x past it and shrink the bars to
+  // slivers — there the front view crops the sides instead (drag to pan).
+  const fitDistance = Math.max(
+    Math.min(
+      frontFitDistance({ columns: hours.length, rows: models.length, fov: camera.fov, aspect }),
+      effectiveCameraDistance,
+    ),
+    Math.min(effectiveCameraDistance * 0.4, minCameraDistance),
+  );
+  // Fog, grid fade and max zoom-out clear the farthest framing (3/4 view).
+  const viewDistance = effectiveCameraDistance;
 
-  // Reframe whenever the aspect-compensated distance changes — container
-  // resize (breakpoint switch, sidebar collapse) or a range/zoom change.
-  // Doesn't fire on the user's own drag/zoom since those don't touch these
-  // deps, so it won't fight manual navigation.
+  // Reframe to the front view whenever the framing changes — container resize
+  // (breakpoint switch, sidebar collapse) or a range switch. Doesn't fire on
+  // the user's own drag/zoom since those don't touch these deps, so it won't
+  // fight manual navigation.
   useEffect(() => {
-    camera.position.set(effectiveCameraDistance * 0.7, effectiveCameraDistance * cameraYRatio, effectiveCameraDistance * 0.7);
+    camera.position.copy(frontPosition(fitDistance));
     camera.updateProjectionMatrix();
-    if (frameRef) frameRef.current = { distance: effectiveCameraDistance, yRatio: cameraYRatio };
-    controlsRef.current?.update();
-  }, [effectiveCameraDistance, cameraYRatio, camera, controlsRef, frameRef]);
+    if (frameRef) frameRef.current = { distance: effectiveCameraDistance, fitDistance };
+    const controls = controlsRef.current;
+    if (controls) {
+      controls.target.copy(VIEW_TARGET);
+      controls.update();
+    }
+  }, [fitDistance, effectiveCameraDistance, camera, controlsRef, frameRef]);
 
   // Dollies the camera in toward a pinned bar so it reads as "brought to the
   // foreground" instead of just growing a tooltip in place. This only runs
@@ -349,19 +437,20 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
     prevPinnedKeyRef.current = pinnedKey;
     dollyUntilRef.current = performance.now() + DOLLY_SETTLE_MS;
     if (pinned) {
-      const focusDistance = Math.max(effectiveCameraDistance / 3, minCameraDistance);
-      const dir = new THREE.Vector3(0.7, cameraYRatio, 0.7).normalize();
+      const focusDistance = Math.max(Math.min(fitDistance * 0.6, effectiveCameraDistance / 3), minCameraDistance);
       dollyGoalRef.current.target.set(pinned.x, pinned.height / 2, pinned.z);
-      dollyGoalRef.current.position.copy(dollyGoalRef.current.target).addScaledVector(dir, focusDistance);
+      dollyGoalRef.current.position.copy(dollyGoalRef.current.target).addScaledVector(FRONT_DIR, focusDistance);
     } else {
-      dollyGoalRef.current.target.set(0, MAX_HEIGHT / 3, 0);
-      dollyGoalRef.current.position.set(effectiveCameraDistance * 0.7, effectiveCameraDistance * cameraYRatio, effectiveCameraDistance * 0.7);
+      dollyGoalRef.current.target.copy(VIEW_TARGET);
+      dollyGoalRef.current.position.copy(frontPosition(fitDistance));
     }
   }
-  useFrame((_, delta) => {
+  useFrame((state, rawDelta) => {
     if (performance.now() > dollyUntilRef.current) return;
     const controls = controlsRef.current;
     if (!controls) return;
+    const delta = Math.min(rawDelta, MAX_FRAME_DELTA);
+    state.invalidate();
     const { position: wantPosition, target: wantTarget } = dollyGoalRef.current;
     camera.position.set(
       THREE.MathUtils.damp(camera.position.x, wantPosition.x, DAMP_LAMBDA, delta),
@@ -381,12 +470,14 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
   // pattern as the pin dolly above: it only runs while performance.now() is
   // before goal.until, then clears itself so it never fights a subsequent
   // manual orbit/pan.
-  useFrame((_, delta) => {
+  useFrame((state, rawDelta) => {
     const goal = navGoalRef?.current;
     if (!goal) return;
     const controls = controlsRef.current;
     if (!controls) return;
     if (performance.now() > goal.until) { navGoalRef.current = null; return; }
+    const delta = Math.min(rawDelta, MAX_FRAME_DELTA);
+    state.invalidate();
     camera.position.set(
       THREE.MathUtils.damp(camera.position.x, goal.position.x, DAMP_LAMBDA, delta),
       THREE.MathUtils.damp(camera.position.y, goal.position.y, DAMP_LAMBDA, delta),
@@ -417,6 +508,10 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
     return () => clearTimeout(idleTimerRef.current);
   }, []);
 
+  // OrbitControls advances autoRotate inside its own update(), which only
+  // runs on rendered frames — keep frames coming while it's spinning.
+  useFrame((state) => { if (autoRotate) state.invalidate(); });
+
   // Keep rotation paused for as long as a tooltip is pinned open, regardless
   // of whether OrbitControls itself fired a start/end (a plain click may not).
   useEffect(() => {
@@ -437,15 +532,32 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
   const offsetX = -((hours.length - 1) * SPACING) / 2;
   const offsetZ = -((models.length - 1) * SPACING) / 2;
   // Labels sit one step beyond the last model row, on the +Z side — that's
-  // the edge nearest the default camera corner (see cameraYRatio/position in
-  // MetricSurface3D), so they read in the foreground instead of being
-  // occluded by the bar field.
+  // the edge facing the default front camera (FRONT_DIR), so they read in the
+  // foreground instead of being occluded by the bar field.
   const labelZ = offsetZ + models.length * SPACING;
-  const labelIndices = pickLabelIndices(hours.length);
-
   // Hover always previews on top of a pin (the mouse is literally over it);
   // otherwise fall back to whatever's pinned.
   const active = hovered || pinned;
+  const activeColumn = active ? Math.round((active.x - offsetX) / SPACING) : null;
+  const columnLabels = hours.map((_, hi) => xLabels[labelOffset + hi] ?? '');
+  const labelIndices = pickLabelIndices(hours.length, columnLabels, labelFontSize, activeColumn);
+  // Short floor ticks tie each date to its column: with the labels a row in
+  // front of the bar field, a date between two columns was hard to place.
+  const tickZ = offsetZ + (models.length - 0.5) * SPACING + 0.12;
+
+  // Built once per data/theme change instead of two THREE.Color allocations
+  // per bar per render (hover alone re-renders the whole field).
+  const barColors = useMemo(() => {
+    const surface = new THREE.Color(palette.surface);
+    return values.map((row, mi) => {
+      const { provider, index } = providerIndices[mi];
+      const base = new THREE.Color(colorForModel(provider, index, { forThreeJs: true }));
+      return row.map(value => {
+        const ratio = value / max;
+        return base.clone().lerp(surface, value > 0 ? (1 - ratio) * 0.45 : 0.78);
+      });
+    });
+  }, [values, max, providerIndices, palette.surface]);
 
   return (
     <>
@@ -454,7 +566,7 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
           of a plain fill. Fog fades the grid/bars toward that same surface
           tone at distance, blending the geometry into the gradient instead
           of cutting off at a hard edge. */}
-      <fog attach="fog" args={[palette.surface, effectiveCameraDistance * 0.9, effectiveCameraDistance * 2.3]} />
+      <fog attach="fog" args={[palette.surface, viewDistance * 0.9, viewDistance * 2.3]} />
       <hemisphereLight args={[palette.text, palette.surface, 0.3]} />
       <ambientLight intensity={0.4} />
       <directionalLight position={[6, 10, 6]} intensity={0.75} />
@@ -464,7 +576,7 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
         position={[0, 0, 0]}
         cellColor={palette.gridLine}
         sectionColor={palette.gridLine}
-        fadeDistance={effectiveCameraDistance * 2}
+        fadeDistance={viewDistance * 2}
         infiniteGrid={false}
       />
       <ContactShadows
@@ -487,9 +599,8 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
           // toward the scene surface color, so magnitude reads through color
           // as well as height. Zero-value cells fade much further — they're a
           // placeholder marker, not a real (if small) data point.
-          const { provider, index } = providerIndices[mi];
-          const barColor = new THREE.Color(colorForModel(provider, index, { forThreeJs: true }))
-            .lerp(new THREE.Color(palette.surface), hasValue ? (1 - ratio) * 0.45 : 0.78);
+          const { provider } = providerIndices[mi];
+          const barColor = barColors[mi][hi];
           const cellInfo = { key, model, provider, hour: xLabels[labelOffset + hi] ?? '', value, x, z, height, color: barColor, raw: rawValues[mi][hi], bucketTotal: columnTotals?.[hi], metric };
           const isActiveCell = !!active && active.key === key;
           const isActiveRow = !!active && active.model === model;
@@ -513,13 +624,18 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
         })
       ))}
       {labelIndices.map(hi => (
-        <CanvasTextSprite
-          key={hi}
-          text={xLabels[labelOffset + hi] ?? ''}
-          color={palette.text}
-          fontSize={labelFontSize}
-          position={[offsetX + hi * SPACING, 0.05, labelZ]}
-        />
+        <React.Fragment key={hi}>
+          <mesh position={[offsetX + hi * SPACING, 0.006, tickZ]}>
+            <boxGeometry args={[0.03, 0.01, 0.24]} />
+            <meshBasicMaterial color={hi === activeColumn ? palette.accent : palette.muted} />
+          </mesh>
+          <CanvasTextSprite
+            text={columnLabels[hi]}
+            color={hi === activeColumn ? palette.accent : palette.text}
+            fontSize={labelFontSize}
+            position={[offsetX + hi * SPACING, 0.05, labelZ]}
+          />
+        </React.Fragment>
       ))}
       {active && <FocusRing x={active.x} z={active.z} color={active.color} />}
       {active && (
@@ -544,7 +660,7 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
         onStart={pauseAutoRotate}
         onEnd={scheduleAutoRotate}
         minDistance={Math.min(effectiveCameraDistance * 0.4, minCameraDistance)}
-        maxDistance={effectiveCameraDistance * 1.8}
+        maxDistance={viewDistance * 1.8}
         maxPolarAngle={Math.PI / 2.1}
         target={[0, MAX_HEIGHT / 3, 0]}
         makeDefault
@@ -591,7 +707,7 @@ function MetricSurface3D({
   // REFERENCE_ASPECT above) — resetView reads it instead of the raw
   // pre-aspect cameraDistance so the reset button reframes to what's actually
   // on screen, not the desktop-tuned default.
-  const frameRef = useRef({ distance: 0, yRatio: 0.55 });
+  const frameRef = useRef({ distance: 0, fitDistance: 0 });
   const grid = useMemo(() => buildGrid(modelTimeSeries || [], metric), [modelTimeSeries, metric]);
   const providerIndices = useMemo(() => modelProviderIndices(grid.models, modelToProvider), [grid.models, modelToProvider]);
   const [hovered, setHovered] = useState(null);
@@ -599,6 +715,8 @@ function MetricSurface3D({
   // Staged by the camera-control handlers (exposed via ref), consumed by
   // Scene's fly-to useFrame.
   const navGoalRef = useRef(null);
+  const invalidateRef = useRef(null);
+  const setNavGoal = (goal) => { navGoalRef.current = goal; invalidateRef.current?.(); };
 
   // The pinned/hovered cell references a specific grid coordinate (`mi-hi`) and
   // caches that cell's values at pin time. When the grid's shape changes — a
@@ -648,7 +766,6 @@ function MetricSurface3D({
   const cameraDistance = (gridSpan * 1.4 + 5) * zoomFactor;
   const isDense = spanDays > DENSE_THRESHOLD;
   const barSize = isDense ? BAR_SIZE * 0.6 : BAR_SIZE;
-  const cameraYRatio = isDense ? 0.85 : 0.55;
   const labelFontSize = Math.max(
     BASE_LABEL_FONT_SIZE,
     BASE_LABEL_FONT_SIZE * Math.sqrt(gridSpan / BASE_LABEL_GRID_SPAN)
@@ -656,7 +773,7 @@ function MetricSurface3D({
 
   // Read Scene's aspect-compensated framing when it's available, else the raw
   // desktop-tuned defaults above.
-  const framing = () => (frameRef.current.distance ? frameRef.current : { distance: cameraDistance, yRatio: cameraYRatio });
+  const framing = () => (frameRef.current.distance ? frameRef.current : { distance: cameraDistance, fitDistance: cameraDistance });
 
   // Don't rely on OrbitControls' own reset() — it restores whatever
   // position/target existed when the controls were constructed, which is only
@@ -668,38 +785,23 @@ function MetricSurface3D({
     setPinned(null);
     const controls = controlsRef.current;
     if (!controls) return;
-    const { distance, yRatio } = framing();
-    controls.object.position.set(distance * 0.7, distance * yRatio, distance * 0.7);
-    controls.target.set(0, MAX_HEIGHT / 3, 0);
+    controls.object.position.copy(frontPosition(framing().fitDistance));
+    controls.target.copy(VIEW_TARGET);
     controls.update();
   };
 
-  // The fly-to / nudge handlers just stage a goal in navGoalRef and let
-  // Scene's fly-to useFrame damp the camera there over a short settle window —
-  // no snapping, and it yields to a manual orbit/pan the moment the user
-  // starts one.
-  const flyToView = (kind) => {
-    setPinned(null);
-    const { distance: d, yRatio } = framing();
-    const target = new THREE.Vector3(0, MAX_HEIGHT / 3, 0);
-    let position;
-    switch (kind) {
-      case 'front': position = new THREE.Vector3(0, d * 0.32, d * 0.98); break;
-      case 'top':   position = new THREE.Vector3(0.001, d * 1.45, 0.001); break;
-      case 'side':  position = new THREE.Vector3(d * 0.98, d * 0.32, 0); break;
-      default:      position = new THREE.Vector3(d * 0.7, d * yRatio, d * 0.7); break; // iso / 3-quarter
-    }
-    navGoalRef.current = { position, target, until: performance.now() + 700 };
-  };
-
+  // The nudge handlers just stage a goal in navGoalRef and let Scene's fly-to
+  // useFrame damp the camera there over a short settle window — no snapping,
+  // and it yields to a manual orbit/pan the moment the user starts one.
   const nudgeZoom = (factor) => {
     const c = controlsRef.current;
     if (!c) return;
     const target = c.target.clone();
     const offset = c.object.position.clone().sub(target);
-    const maxLen = framing().distance * 1.8;
+    const { distance, fitDistance: fit } = framing();
+    const maxLen = Math.max(distance, fit) * 1.8;
     const len = THREE.MathUtils.clamp(offset.length() * factor, minCameraDistance, maxLen);
-    navGoalRef.current = { position: target.clone().add(offset.setLength(len)), target, until: performance.now() + 450 };
+    setNavGoal({ position: target.clone().add(offset.setLength(len)), target, until: performance.now() + 450 });
   };
 
   const nudgeRotate = (radians) => {
@@ -707,10 +809,10 @@ function MetricSurface3D({
     if (!c) return;
     const target = c.target.clone();
     const offset = c.object.position.clone().sub(target).applyAxisAngle(new THREE.Vector3(0, 1, 0), radians);
-    navGoalRef.current = { position: target.clone().add(offset), target, until: performance.now() + 550 };
+    setNavGoal({ position: target.clone().add(offset), target, until: performance.now() + 550 });
   };
 
-  useImperativeHandle(ref, () => ({ flyToView, nudgeZoom, nudgeRotate, resetView }));
+  useImperativeHandle(ref, () => ({ nudgeZoom, nudgeRotate, resetView }));
 
   if (loading) {
     return <div className="obs-skeleton" style={{ height: '100%', borderRadius: 4 }} />;
@@ -732,10 +834,11 @@ function MetricSurface3D({
     <div className={`ms3d-wrap${touch ? ' ms3d-wrap--touch' : ''}`}>
       <Canvas3DErrorBoundary fallback={<Unsupported3DFallback onSwitchTo2D={onSwitchTo2D} t={t} />}>
         <Canvas
+          frameloop="demand"
           resize={{ scroll: false, debounce: 0 }}
           dpr={[1, 2]}
           gl={{ alpha: true }}
-          camera={{ position: [cameraDistance * 0.7, cameraDistance * cameraYRatio, cameraDistance * 0.7], fov: 45 }}
+          camera={{ position: frontPosition(cameraDistance).toArray(), fov: 45 }}
           onPointerMissed={() => setPinned(null)}
         >
           <Scene
@@ -747,12 +850,12 @@ function MetricSurface3D({
             gridSpan={gridSpan}
             labelFontSize={labelFontSize}
             cameraDistance={cameraDistance}
-            cameraYRatio={cameraYRatio}
             minCameraDistance={minCameraDistance}
             barSize={barSize}
             controlsRef={controlsRef}
             frameRef={frameRef}
             navGoalRef={navGoalRef}
+            invalidateRef={invalidateRef}
             orbitLocked={orbitLocked}
             autoRotateOn={autoRotateOn}
             hovered={hovered}
