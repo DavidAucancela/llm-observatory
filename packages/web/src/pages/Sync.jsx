@@ -104,7 +104,8 @@ export default function Sync({ darkMode, onToggleDarkMode }) {
   // Runs execute in the background on the server and announce themselves on
   // the socket ('sync-update': start, each imported chunk, finish). Progress
   // ticks update in place; a start or finish refetches the overview (the
-  // event is broadcast and carries no org, so the refetch is what scopes it).
+  // event reaches only this org's sockets and carries no data — the refetch
+  // is what loads it).
   useEffect(() => {
     let timer = null;
     const onUpdate = (u) => {

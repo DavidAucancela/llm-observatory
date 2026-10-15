@@ -20,6 +20,7 @@ const { Server } = require('socket.io');
 const pool = require('./db/pool');
 const { retentionDays } = require('./utils/retention');
 const { markStaleRuns, refreshAll, autoSyncEnabled, setSyncEmitter, AUTO_SYNC_CRON } = require('./services/syncRunner');
+const { socketAuth, emitToOrg } = require('./services/realtime');
 const logger = require('./logger');
 const { authMiddleware } = require('./middleware/auth');
 
@@ -63,8 +64,11 @@ app.use(cors({ origin: corsOrigin }));
 // once JSON-escaped) — see POST /api/metrics in routes/metrics.js.
 app.use(express.json({ limit: '1mb' }));
 app.set('io', io);
+// Every socket must present a dashboard JWT and lands in its org's room —
+// events are emitted per org, never broadcast (services/realtime.js).
+io.use(socketAuth);
 // Sync progress/status → the Sync page (replaces its 4 s polling).
-setSyncEmitter((payload) => io.emit('sync-update', payload));
+setSyncEmitter((orgId, payload) => emitToOrg(io, orgId, 'sync-update', payload));
 
 // ── Rate limiters ─────────────────────────────────────────────────────────────
 // General API: 1000 req/min per IP

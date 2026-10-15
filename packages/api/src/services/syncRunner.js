@@ -56,9 +56,11 @@ const FAILURES_BEFORE_ALERT = 2;
 // The overview warns about rows the retention purge deletes within this window.
 const EXPIRING_WINDOW_DAYS = 30;
 
-// Live progress for the Sync page (index.js wires this to socket.io). The
-// payload carries no org id or data — only enough for a page that already
-// shows this run to update, or to know it should refetch its own overview.
+// Live progress for the Sync page. index.js wires this to socket.io and
+// delivers it to the run's org room only (services/realtime.js) — never a
+// broadcast. The payload carries no data — only enough for a page that
+// already shows this run to update, or to know it should refetch its overview.
+// Signature: emitSyncUpdate(orgId, payload).
 let emitSyncUpdate = () => {};
 function setSyncEmitter(fn) { emitSyncUpdate = typeof fn === 'function' ? fn : () => {}; }
 
@@ -182,7 +184,7 @@ async function startSync({ orgId, provider, start, end, days, trigger = 'manual'
     }
     throw err;
   }
-  emitSyncUpdate({ sync_id: syncId, provider, status: 'running', progress: { done: 0, total: chunks.length } });
+  emitSyncUpdate(orgId, { sync_id: syncId, provider, status: 'running', progress: { done: 0, total: chunks.length } });
 
   const done = (async () => {
     let imported = 0;
@@ -205,7 +207,7 @@ async function startSync({ orgId, provider, start, end, days, trigger = 'manual'
             `UPDATE sync_logs SET records_synced = $1, details = details || $2::jsonb WHERE id = $3`,
             [imported, JSON.stringify({ progress }), syncId]
           );
-          emitSyncUpdate({ sync_id: syncId, provider, status: 'running', progress });
+          emitSyncUpdate(orgId, { sync_id: syncId, provider, status: 'running', progress });
         }
       }
       // An empty fetch is a degraded/empty response (importBuckets leaves
@@ -231,7 +233,7 @@ async function startSync({ orgId, provider, start, end, days, trigger = 'manual'
          WHERE id = $4`,
         [imported, firstISO, lastISO, syncId, JSON.stringify(details)]
       );
-      emitSyncUpdate({ sync_id: syncId, provider, status: 'success', progress: details.progress });
+      emitSyncUpdate(orgId, { sync_id: syncId, provider, status: 'success', progress: details.progress });
       console.log(`[sync] ${provider} (${trigger}) org ${orgId}: ${imported} records imported`);
       return { status: 'success', imported };
     } catch (err) {
@@ -249,7 +251,7 @@ async function startSync({ orgId, provider, start, end, days, trigger = 'manual'
          WHERE id = $4`,
         [imported, err.message, code, syncId, JSON.stringify(alert)]
       ).catch(() => {});
-      emitSyncUpdate({ sync_id: syncId, provider, status: 'error' });
+      emitSyncUpdate(orgId, { sync_id: syncId, provider, status: 'error' });
       console.error(`[sync] ${provider} (${trigger}) org ${orgId} error:`, err.message);
       return { status: 'error', error: err.message };
     }
