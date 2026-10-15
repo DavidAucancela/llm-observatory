@@ -191,6 +191,8 @@ router.get('/', async (req, res) => {
     const page    = Math.max(1, parseInt(req.query.page)  || 1);
     const limit   = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset  = (page - 1) * limit;
+    // One model, or several comma-separated (the Dashboard's "view requests"
+    // passes every visible model of a chart bucket).
     const model    = req.query.model;
     const provider = req.query.provider;
     const status   = req.query.status; // 'error' | 'success'
@@ -211,7 +213,7 @@ router.get('/', async (req, res) => {
     } else {
       where += ` AND timestamp > NOW() - INTERVAL '${interval}'`;
     }
-    if (model)    { params.push(model);    where += ` AND model = $${params.length}`; }
+    if (model)    { params.push(String(model).split(',').map(m => m.trim()).filter(Boolean)); where += ` AND model = ANY($${params.length})`; }
     if (provider) { params.push(provider); where += ` AND provider = $${params.length}`; }
     if (status === 'error')   where += ` AND status_code >= 400`;
     if (status === 'success') where += ` AND status_code < 400`;
@@ -595,7 +597,7 @@ router.get('/export', async (req, res) => {
       where += ` AND timestamp > NOW() - INTERVAL '${interval}'`;
     }
     if (provider) { params.push(provider); where += ` AND provider = $${params.length}`; }
-    if (model)    { params.push(model);    where += ` AND model = $${params.length}`; }
+    if (model)    { params.push(String(model).split(',').map(m => m.trim()).filter(Boolean)); where += ` AND model = ANY($${params.length})`; }
     if (status === 'error')   where += ` AND status_code >= 400`;
     if (status === 'success') where += ` AND status_code < 400`;
     if (search) {

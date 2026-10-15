@@ -494,6 +494,7 @@ body {
   border-radius: 5px;
   overflow: hidden;
   font-size: 12px;
+  flex-wrap: nowrap;
 }
 
 .obs-range-btn {
@@ -504,6 +505,8 @@ body {
   cursor: pointer;
   font-family: var(--font-sans);
   font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: background 0.1s, color 0.1s;
 }
 
@@ -511,7 +514,10 @@ body {
 .obs-range-btn.active { background: var(--accent); color: var(--d-page, #fff); font-weight: 600; }
 .obs-range-btn + .obs-range-btn { border-left: 1px solid var(--border); }
 
-.obs-range-wrap { position: relative; }
+.obs-range-wrap { position: relative; min-width: 0; }
+/* One row always: on narrow screens the presets scroll sideways instead of wrapping. */
+.obs-range-picker { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.obs-range-picker::-webkit-scrollbar { display: none; }
 
 .obs-range-quick {
   display: grid;
@@ -1125,11 +1131,32 @@ body {
 }
 .ms3d-wrap canvas { cursor: grab; }
 .ms3d-wrap canvas:active { cursor: grabbing; }
-/* OrbitControls sets an inline `touch-action: none` on its element; on touch
-   devices let one-finger vertical drags scroll the page (see FINGER_TOUCHES
-   in MetricSurface3D.jsx — two fingers still reach the controls). */
-.ms3d-wrap--touch,
-.ms3d-wrap--touch * { touch-action: pan-y !important; }
+/* Touch, not exploring: OrbitControls sets an inline `touch-action: none`;
+   override it so a finger on the chart scrolls the page (see EXPLORE_IDLE_MS
+   in MetricSurface3D.jsx). Exploring drops this class and the canvas takes
+   every gesture. */
+.ms3d-wrap--inert,
+.ms3d-wrap--inert * { touch-action: pan-y !important; }
+.ms3d-wrap--exploring { box-shadow: inset 0 0 0 2px var(--accent); border-radius: 8px; }
+.ms3d-explore-btn {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 2;
+  padding: 7px 14px;
+  border-radius: 999px;
+  /* Same accent fill as the selected 2D/3D toggle and date range — it's the
+     one control a phone user has to find to navigate the chart. */
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--d-page, #fff);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+.ms3d-explore-btn.is-active { background: color-mix(in srgb, var(--surface) 92%, transparent); color: var(--accent); }
 
 .ms3d-fallback {
   width: 100%;
@@ -1182,9 +1209,12 @@ body {
    toward the foreground (see MetricSurface3D's Scene dolly effect). */
 .ms3d-summary-card {
   position: absolute;
+  /* Top-left: top-right is where the 2D/3D toggle + expand tab float while
+     the rail is collapsed, and the usage hint runs along the bottom. */
   top: 10px;
-  right: 10px;
-  width: 190px;
+  left: 10px;
+  width: 200px;
+  z-index: 3;
   background: var(--surface-raised, var(--surface));
   border: 1px solid var(--accent);
   border-radius: 10px;
@@ -1195,6 +1225,13 @@ body {
   max-height: calc(100% - 20px);
   overflow-y: auto;
   animation: ms3d-summary-in 0.22s ease-out;
+}
+.chart2d-wrap { position: relative; width: 100%; height: 100%; }
+.chart2d-pin-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms3d-summary-details {
+  width: 100%;
+  margin-top: 10px;
+  justify-content: center;
 }
 @keyframes ms3d-summary-in {
   from { opacity: 0; transform: translateY(-6px); }
@@ -1310,11 +1347,6 @@ body {
 /* Mobile-only placeholder (see RangeSpend); the desktop band just omits itself. */
 .dash-range-spend-empty { display: none; }
 
-/* Touch: rotate/zoom are two-finger gestures on the canvas, so the step
-   buttons only cost rail height there. View presets and lock/auto-rotate stay. */
-@media (pointer: coarse) {
-  .dash-chart-rail-3d-row:not(.dash-chart-rail-3d-row--trio) { display: none; }
-}
 
 .chart2d-tooltip {
   background: var(--surface-raised, var(--surface));
@@ -2438,26 +2470,37 @@ body {
     overflow-y: visible;
   }
 
-  /* Chart: the rail can't fit beside the plot on a phone, so it goes back on
-     top as a horizontal bar with the legend scrolling sideways. */
+  /* Chart: the rail can't fit beside the plot on a phone. Stacked on top it
+     pushed the plot down and left empty bands around it, so it now floats
+     over the plot as a collapsible panel and the plot keeps the whole card. */
   .dash-chart-card {
-    height: auto;
+    height: min(72vh, 560px);
     flex-direction: column;
   }
   .dash-chart-rail {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    z-index: 3;
     width: auto;
     flex-direction: row;
     align-items: center;
     gap: 10px;
     padding: 12px 14px;
-    border-left: none;
-    border-bottom: 1px solid var(--border);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     flex-wrap: wrap;
+    overflow-y: auto;
     transition: max-height 0.22s cubic-bezier(0.4, 0, 0.2, 1), padding 0.22s cubic-bezier(0.4, 0, 0.2, 1),
                 opacity 0.16s ease, border-color 0.22s ease;
     /* Only a ceiling for the collapse transition — 300px clipped the 3D
        controls (title + legend + three control rows) into an inner scroll. */
-    max-height: 640px;
+    max-height: calc(100% - 16px);
   }
   /* The rail is a horizontal bar here, so the collapse dimension flips from
      width (desktop) to max-height. */
@@ -2466,6 +2509,7 @@ body {
     max-height: 0;
     padding-top: 0;
     padding-bottom: 0;
+    box-shadow: none;
   }
   .dash-chart-rail-head { flex: 1 0 100%; }
   /* Horizontal rail here: every section becomes a full-width row of the wrap
@@ -2533,8 +2577,8 @@ body {
        layout .dash-chart-card is height:auto, so flex-basis wins over the
        height below and collapses the chart to ~0px without this reset. */
     flex: none;
-    height: 420px;
-    padding: 12px 14px;
+    height: 100%;
+    padding: 0;
   }
 
   /* Header: single row on mobile too — hamburger, range picker and the
@@ -2563,7 +2607,6 @@ body {
   .obs-divider-v {
     display: none;
   }
-  .obs-range-picker,
   .obs-header-right {
     flex-shrink: 0;
   }
