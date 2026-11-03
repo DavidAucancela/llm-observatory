@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import ProviderBadge from '../components/ProviderBadge';
 import Sparkline from '../components/Sparkline';
 import HBar from '../components/HBar';
@@ -432,7 +432,13 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
   // only, no localStorage: it's a scroll-depth aid, not a durable preference.
   const [mobileTab, setMobileTab] = useState('overview');
   const [toolbarCollapsed, setToolbarCollapsed] = useState(
-    () => readPref('obs-chart-toolbar-collapsed') === 'true'
+    // On phones the rail floats over the plot, so it starts collapsed there
+    // unless the user opened it before.
+    () => {
+      const saved = readPref('obs-chart-toolbar-collapsed');
+      if (saved != null) return saved === 'true';
+      return typeof window !== 'undefined' && window.matchMedia?.('(max-width: 767px)').matches;
+    }
   );
   // Usage-hint banner shown along the bottom of the chart plot (not a popover
   // in the rail — see ChartHintBanner). Session-only, no localStorage.
@@ -625,6 +631,32 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
 
   const toggleChartHint = () => setChartHintOpen(o => !o);
 
+  // A pinned 3D bar opens its summary card over the plot: close the usage
+  // hint along the bottom, and on phones fold the floating rail (not
+  // persisted) so neither sits under the card.
+  const handlePinnedChange = useCallback((isPinned) => {
+    if (!isPinned) return;
+    setChartHintOpen(false);
+    if (window.matchMedia?.('(max-width: 767px)').matches) setToolbarCollapsed(true);
+  }, []);
+
+  // "View requests" on the 3D bar / 2D bucket card: Requests filtered to that
+  // bucket (as a custom day range — the picker is day-granular, so an hourly
+  // bucket opens its whole day) and to its model(s), comma-separated.
+  const navigate = useNavigate();
+  const openBucketInActivity = useCallback(({ bucket, models }) => {
+    const startDate = new Date(bucket);
+    if (isNaN(startDate)) return;
+    const endDate = new Date(startDate);
+    if (bucketUnit === 'week') endDate.setUTCDate(endDate.getUTCDate() + 6);
+    if (bucketUnit === 'month') endDate.setUTCMonth(endDate.getUTCMonth() + 1, 0);
+    const day = (d) => d.toISOString().slice(0, 10);
+    const today = todayUtc();
+    const params = new URLSearchParams({ start: day(startDate), end: day(endDate) > today ? today : day(endDate) });
+    if (models?.length) params.set('model', models.join(','));
+    navigate(`/activity?${params}`);
+  }, [bucketUnit, navigate]);
+
   // Click-away-to-close: dismiss on any click outside the whole chart card,
   // not just outside the banner/button — otherwise clicking the rail's own
   // 2D/3D toggle or legend (reasonable while the hint is open, e.g. to
@@ -760,6 +792,8 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
                   orbitLocked={orbitLocked}
                   autoRotateOn={autoRotateOn}
                   onSwitchTo2D={() => { setChartView('2d'); writePref('obs-chart-view', '2d'); }}
+                  onPinnedChange={handlePinnedChange}
+                  onViewDetails={openBucketInActivity}
                 />
               ) : (
                 <ModelTrendChart2D
@@ -770,6 +804,8 @@ export default function Dashboard({ darkMode, onToggleDarkMode }) {
                   hiddenModels={hiddenModels}
                   modelToProvider={modelToProvider}
                   prevSeries={compareSupported && comparePrev ? prevMetricSeries : null}
+                  onPinnedChange={handlePinnedChange}
+                  onViewDetails={openBucketInActivity}
                 />
               )}
             </Suspense>

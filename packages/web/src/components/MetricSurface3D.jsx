@@ -8,12 +8,15 @@ import { buildGrid, formatMetricValue } from '../utils/metricGrid';
 import { useCoarsePointer } from '../hooks/useCoarsePointer';
 import * as THREE from 'three';
 
-// On touch, one finger must scroll the page — OrbitControls' default one-finger
-// rotate (plus its `touch-action: none`, overridden by .ms3d-wrap--touch in
-// index.css) trapped the whole dashboard under a finger landing on the chart.
-// Two fingers rotate + zoom instead; a tap still pins a bar.
+// Touch: the chart is inert by default so a finger on it scrolls the page
+// like any other card (taps still pin a bar). "Explore" hands every gesture
+// to the controls — one finger rotates, two pinch-zoom and pan — until
+// "Done", a tap outside the chart, or EXPLORE_IDLE_MS without touching it.
+// Two-finger navigation alongside page scroll (touch-action: pan-y) didn't
+// work: the browser claimed most gestures as a scroll and cancelled the
+// controls' pointers mid-drag.
+const EXPLORE_IDLE_MS = 6000;
 const MOUSE_TOUCHES = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
-const FINGER_TOUCHES = { ONE: null, TWO: THREE.TOUCH.DOLLY_ROTATE };
 
 const BAR_SIZE = 0.62;
 const SPACING  = 0.9;
@@ -122,6 +125,11 @@ function frontPosition(distance) {
   return VIEW_TARGET.clone().addScaledVector(FRONT_DIR, distance);
 }
 const MAX_ASPECT_COMPENSATION = 1.6;
+// A portrait/near-square frame (phones) fit by width leaves empty bands above
+// and below the bars. Below this aspect the front view zooms in and crops the
+// sides instead (drag to pan), so the bars fill the frame.
+const NARROW_ASPECT = 1.2;
+const NARROW_ZOOM = 0.62;
 // Idle time before the camera resumes auto-rotating after a drag/zoom/pan,
 // a bar hover, or a pinned tooltip — long enough to read a tooltip without
 // the scene drifting under it.
@@ -358,7 +366,7 @@ function pickLabelIndices(count, labels, fontSize, focus = null) {
 // buildGrid trims leading/trailing empty buckets, every grid.hours index hi
 // must be offset by grid.labelOffset to land back on the right xLabels entry.
 // `?? ''` below is just a guard, not the real defense.
-function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance, minCameraDistance, barSize, labelFontSize, controlsRef, frameRef, navGoalRef, invalidateRef, orbitLocked, autoRotateOn, hovered, pinned, onHoverChange, onUnhoverChange, onPinToggle, hiddenModels, providerIndices }) {
+function Scene({ touch, controlsEnabled = true, onInteract, grid, metric, xLabels, palette, gridSpan, cameraDistance, minCameraDistance, barSize, labelFontSize, controlsRef, frameRef, navGoalRef, invalidateRef, orbitLocked, autoRotateOn, hovered, pinned, onHoverChange, onUnhoverChange, onPinToggle, hiddenModels, providerIndices }) {
   const { hours, models, values, rawValues, columnTotals, max, labelOffset } = grid;
   const [autoRotate, setAutoRotate] = useState(false);
   const autoRotateOnRef = useRef(autoRotateOn);
@@ -399,7 +407,7 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
     Math.min(
       frontFitDistance({ columns: hours.length, rows: models.length, fov: camera.fov, aspect }),
       effectiveCameraDistance,
-    ),
+    ) * (aspect < NARROW_ASPECT ? NARROW_ZOOM : 1),
     Math.min(effectiveCameraDistance * 0.4, minCameraDistance),
   );
   // Fog, grid fade and max zoom-out clear the farthest framing (3/4 view).
@@ -601,7 +609,7 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
           // placeholder marker, not a real (if small) data point.
           const { provider } = providerIndices[mi];
           const barColor = barColors[mi][hi];
-          const cellInfo = { key, model, provider, hour: xLabels[labelOffset + hi] ?? '', value, x, z, height, color: barColor, raw: rawValues[mi][hi], bucketTotal: columnTotals?.[hi], metric };
+          const cellInfo = { key, model, provider, hour: xLabels[labelOffset + hi] ?? '', bucket: hours[hi], value, x, z, height, color: barColor, raw: rawValues[mi][hi], bucketTotal: columnTotals?.[hi], metric };
           const isActiveCell = !!active && active.key === key;
           const isActiveRow = !!active && active.model === model;
           return (
@@ -652,13 +660,14 @@ function Scene({ touch, grid, metric, xLabels, palette, gridSpan, cameraDistance
       )}
       <OrbitControls
         ref={controlsRef}
+        enabled={controlsEnabled}
         enablePan
         enableRotate={!orbitLocked}
-        touches={touch ? FINGER_TOUCHES : MOUSE_TOUCHES}
+        touches={MOUSE_TOUCHES}
         autoRotate={autoRotate}
         autoRotateSpeed={AUTO_ROTATE_SPEED}
-        onStart={pauseAutoRotate}
-        onEnd={scheduleAutoRotate}
+        onStart={() => { pauseAutoRotate(); onInteract?.(); }}
+        onEnd={() => { scheduleAutoRotate(); onInteract?.(); }}
         minDistance={Math.min(effectiveCameraDistance * 0.4, minCameraDistance)}
         maxDistance={viewDistance * 1.8}
         maxPolarAngle={Math.PI / 2.1}
@@ -696,7 +705,7 @@ function useThemePalette() {
 function MetricSurface3D({
   modelTimeSeries, metric, xLabels, loading,
   hiddenModels = new Set(), onSwitchTo2D, modelToProvider = {}, otherModels = [],
-  orbitLocked = false, autoRotateOn = false,
+  orbitLocked = false, autoRotateOn = false, onPinnedChange, onViewDetails,
 }, ref) {
   const { t } = useTranslation();
   const palette = useThemePalette();
@@ -712,6 +721,25 @@ function MetricSurface3D({
   const providerIndices = useMemo(() => modelProviderIndices(grid.models, modelToProvider), [grid.models, modelToProvider]);
   const [hovered, setHovered] = useState(null);
   const [pinned, setPinned] = useState(null);
+  const [exploring, setExploring] = useState(false);
+  const wrapRef = useRef(null);
+  const idleTimerRef = useRef(null);
+  const bumpExplore = () => {
+    clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = setTimeout(() => setExploring(false), EXPLORE_IDLE_MS);
+  };
+  useEffect(() => {
+    if (!exploring) return undefined;
+    bumpExplore();
+    const onDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setExploring(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      clearTimeout(idleTimerRef.current);
+    };
+  }, [exploring]);
   // Staged by the camera-control handlers (exposed via ref), consumed by
   // Scene's fly-to useFrame.
   const navGoalRef = useRef(null);
@@ -731,6 +759,10 @@ function MetricSurface3D({
     setPinned(null);
     setHovered(null);
   }, [structureKey]);
+
+  // Lets the Dashboard clear whatever would sit under the card (usage hint,
+  // the floating rail on phones) while a bar is pinned.
+  useEffect(() => { onPinnedChange?.(Boolean(pinned)); }, [pinned]);
 
   const handlePinToggle = (cellInfo) => {
     setPinned(prev => (prev && prev.key === cellInfo.key ? null : cellInfo));
@@ -831,7 +863,11 @@ function MetricSurface3D({
   }
 
   return (
-    <div className={`ms3d-wrap${touch ? ' ms3d-wrap--touch' : ''}`}>
+    <div
+      ref={wrapRef}
+      className={`ms3d-wrap${touch && !exploring ? ' ms3d-wrap--inert' : ''}${exploring ? ' ms3d-wrap--exploring' : ''}`}
+      onPointerDown={exploring ? bumpExplore : undefined}
+    >
       <Canvas3DErrorBoundary fallback={<Unsupported3DFallback onSwitchTo2D={onSwitchTo2D} t={t} />}>
         <Canvas
           frameloop="demand"
@@ -843,6 +879,8 @@ function MetricSurface3D({
         >
           <Scene
             touch={touch}
+            controlsEnabled={!touch || exploring}
+            onInteract={touch ? bumpExplore : undefined}
             grid={grid}
             metric={metric}
             xLabels={xLabels}
@@ -868,6 +906,17 @@ function MetricSurface3D({
           />
         </Canvas>
       </Canvas3DErrorBoundary>
+
+      {touch && !pinned && (
+        <button
+          type="button"
+          className={`ms3d-explore-btn${exploring ? ' is-active' : ''}`}
+          aria-pressed={exploring}
+          onClick={() => setExploring(v => !v)}
+        >
+          {exploring ? t('dashboard.exploreDone') : t('dashboard.explore3d')}
+        </button>
+      )}
 
       {pinned && (
         // Docked in screen space (outside the Canvas), not floating in 3D
@@ -954,6 +1003,15 @@ function MetricSurface3D({
                 </div>
               )}
             </div>
+          )}
+          {onViewDetails && (
+            <button
+              type="button"
+              className="obs-btn obs-btn-primary ms3d-summary-details"
+              onClick={() => onViewDetails({ bucket: pinned.bucket, models: pinned.model === 'Other' ? null : [pinned.model] })}
+            >
+              {t('dashboard.cellSummaryViewDetails')} →
+            </button>
           )}
         </div>
       )}
