@@ -31,9 +31,20 @@ function sanitize(defaultRange) {
  * TopBar date filter. Persisted under the same localStorage keys on every
  * page, matching the pre-existing behavior where switching range on one page
  * carried over to the others.
+ *
+ * `linkRange` ({start, end} as YYYY-MM-DD, e.g. from a deep link's URL) opens
+ * the page on that custom range without saving it, so following a link
+ * doesn't change the range the other pages open with. A later pick in the
+ * TopBar is saved as usual. An invalid or incomplete linkRange is ignored.
  */
-export function useRangeFilter(defaultRange = '7d') {
-  const [initial] = useState(() => sanitize(defaultRange));
+export function useRangeFilter(defaultRange = '7d', linkRange = null) {
+  const [initial] = useState(() => {
+    const { start, end } = linkRange || {};
+    if (start && end && customRangeError(start, end) === null) {
+      return { range: 'custom', customRange: { start, end } };
+    }
+    return sanitize(defaultRange);
+  });
   const [range, setRangeRaw] = useState(initial.range);
   const [customRange, setCustomRangeRaw] = useState(initial.customRange);
 
