@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import ProviderBadge from './ProviderBadge';
-import { fmtDateTime, fmtLatency, formatCost } from '../utils/fmt';
+import { fmtDateTime, fmtDateYear, fmtLatency, formatCost } from '../utils/fmt';
+import { isSyncAdjustment } from '../utils/syncRows';
 import { useApi } from '../hooks/useApi';
+import { useProviders } from '../hooks/useProviders';
 import { useAuth } from '../auth/AuthProvider';
 
 function CopyButton({ text, style }) {
@@ -190,8 +192,9 @@ export default function RequestDrawer({ requestId, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const { apiFetch } = useApi();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { user } = useAuth();
+  const { labelFor } = useProviders();
   const isAdmin = user?.role === 'admin';
 
   useEffect(() => {
@@ -228,6 +231,9 @@ export default function RequestDrawer({ requestId, onClose }) {
       (parseInt(data.input_tokens || 0) + parseInt(data.output_tokens || 0))
     : 0;
 
+  const isSync = isSyncAdjustment(data);
+  const syncDay = isSync ? fmtDateYear(data.timestamp, i18n.language) : '';
+
   const hasReqParams = reqParams && (
     reqParams.temperature !== undefined || reqParams.max_tokens !== undefined ||
     reqParams.top_p !== undefined || reqParams.stream !== undefined
@@ -239,7 +245,7 @@ export default function RequestDrawer({ requestId, onClose }) {
       <div className="obs-drawer" role="dialog" aria-modal="true" aria-label={t('drawer.title')}>
         <div className="obs-drawer-header">
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{t('drawer.title')}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{isSync ? t('drawer.syncTitle') : t('drawer.title')}</div>
             {data && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                 <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
@@ -270,24 +276,40 @@ export default function RequestDrawer({ requestId, onClose }) {
             </div>
           ) : data ? (
             <>
+              {isSync && (
+                <div className="obs-drawer-section">
+                  <div className="sync-msg" style={{ display: 'flex', flexDirection: 'column', gap: 6, lineHeight: 1.5, color: 'var(--text)' }}>
+                    <span>{t('drawer.syncBody', { provider: labelFor(data.provider), day: syncDay, model: data.model })}</span>
+                    <span style={{ color: 'var(--muted)' }}>{t('drawer.syncCauses')}</span>
+                    <span style={{ color: 'var(--muted)' }}>{t('drawer.syncRecalc')}</span>
+                  </div>
+                </div>
+              )}
+
               <div className="obs-drawer-section">
                 <div className="obs-section-label" style={{ marginBottom: 10 }}>{t('drawer.metadata')}</div>
                 <dl className="meta-grid">
-                  <dt>{t('drawer.time')}</dt>
-                  <dd>{fmtDateTime(data.timestamp)}</dd>
+                  <dt>{isSync ? t('drawer.day') : t('drawer.time')}</dt>
+                  <dd>{isSync ? syncDay : fmtDateTime(data.timestamp)}</dd>
                   <dt>{t('drawer.provider')}</dt>
                   <dd><ProviderBadge provider={data.provider} /></dd>
                   <dt>{t('drawer.model')}</dt>
                   <dd style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{data.model}</dd>
-                  {data.api_key_hint && (
-                    <><dt>{t('drawer.apiKey')}</dt><dd style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{data.api_key_hint}</dd></>
+                  {isSync ? (
+                    <><dt>{t('drawer.kind')}</dt><dd>{t('drawer.syncTitle')}</dd></>
+                  ) : (
+                    <>
+                      {data.api_key_hint && (
+                        <><dt>{t('drawer.apiKey')}</dt><dd style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{data.api_key_hint}</dd></>
+                      )}
+                      <dt>{t('drawer.latency')}</dt>
+                      <dd>{fmtLatency(data.latency_ms)}</dd>
+                      <dt>{t('drawer.status')}</dt>
+                      <dd style={{ color: data.status_code < 400 ? 'var(--success)' : 'var(--error)' }}>
+                        {data.status_code} {data.status_code < 400 ? t('drawer.statusOk') : t('drawer.statusError')}
+                      </dd>
+                    </>
                   )}
-                  <dt>{t('drawer.latency')}</dt>
-                  <dd>{fmtLatency(data.latency_ms)}</dd>
-                  <dt>{t('drawer.status')}</dt>
-                  <dd style={{ color: data.status_code < 400 ? 'var(--success)' : 'var(--error)' }}>
-                    {data.status_code} {data.status_code < 400 ? t('drawer.statusOk') : t('drawer.statusError')}
-                  </dd>
                   {data.stop_reason && <><dt>{t('drawer.stopReason')}</dt><dd>{data.stop_reason}</dd></>}
                   {data.error_type && (
                     <><dt>{t('drawer.errorType')}</dt><dd style={{ color: 'var(--error)', fontFamily: 'var(--font-mono)', fontSize: 11 }}>{data.error_type}</dd></>
@@ -302,7 +324,7 @@ export default function RequestDrawer({ requestId, onClose }) {
               </div>
 
               <div className="obs-drawer-section">
-                <div className="obs-section-label" style={{ marginBottom: 10 }}>{t('drawer.tokenBreakdown')}</div>
+                <div className="obs-section-label" style={{ marginBottom: 10 }}>{isSync ? t('drawer.syncTokenBreakdown') : t('drawer.tokenBreakdown')}</div>
                 <dl className="meta-grid">
                   <dt>{t('drawer.input')}</dt>
                   <dd>{parseInt(data.input_tokens || 0).toLocaleString()}</dd>
@@ -381,6 +403,7 @@ export default function RequestDrawer({ requestId, onClose }) {
                 </div>
               )}
 
+              {!isSync && (<>
               <div className="obs-drawer-section">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                   <div className="obs-section-label" style={{ marginBottom: 0 }}>{t('drawer.promptPreview')}</div>
@@ -421,6 +444,7 @@ export default function RequestDrawer({ requestId, onClose }) {
               </div>
 
               <EvaluationSection apiCallId={data.id} hasResponse={!!data.response_full} isAdmin={isAdmin} />
+              </>)}
             </>
           ) : (
             <div className="obs-empty">

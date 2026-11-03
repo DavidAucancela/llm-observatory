@@ -212,6 +212,13 @@
     "lastLogin": "Último acceso"
   },
   "drawer": {
+    "syncTitle": "Ajuste de sincronización",
+    "syncBody": "Esta fila no es una solicitud. Es la diferencia entre lo que {{provider}} reporta como gastado el {{day}} en {{model}} y lo que el SDK registró ese día. La agrega la sincronización para que tus totales coincidan con lo que factura el proveedor.",
+    "syncCauses": "Causas habituales: tokens de caché que el SDK no suma al costo, llamadas hechas fuera del SDK (consola, otras apps con la misma clave) o pequeñas diferencias de precio. Consultar los datos de uso del proveedor no tiene costo.",
+    "syncRecalc": "Se recalcula en cada sincronización: el monto del día en curso cambia a lo largo del día, pero no se acumula.",
+    "syncTokenBreakdown": "Tokens no registrados por el SDK (aprox.)",
+    "day": "Día",
+    "kind": "Tipo",
     "title": "Detalle de solicitud",
     "metadata": "Metadatos",
     "time": "Hora",
@@ -380,6 +387,8 @@
     "unknownError": "Desconocido"
   },
   "activity": {
+    "syncAdjustment": "Ajuste de sincronización",
+    "syncAdjustmentHint": "No es una llamada a la API: es gasto que {{provider}} reportó para ese día y que el SDK no registró. Lo agrega la sincronización y consultarlo no cuesta nada.",
     "requestsTab": "Solicitudes",
     "modelsTab": "Modelos",
     "searchPlaceholder": "Buscar por modelo o prompt…",

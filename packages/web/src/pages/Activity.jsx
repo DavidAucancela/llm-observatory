@@ -5,7 +5,8 @@ import ProviderBadge from '../components/ProviderBadge';
 import RequestDrawer from '../components/RequestDrawer';
 import TopBar from '../components/TopBar';
 import CoverageBanner from '../components/CoverageBanner';
-import { fmtDateTime, formatCost, fmtLatency } from '../utils/fmt';
+import { fmtDateTime, fmtDateYear, formatCost, fmtLatency } from '../utils/fmt';
+import { isSyncAdjustment } from '../utils/syncRows';
 import { useApi } from '../hooks/useApi';
 import { useRangeFilter } from '../hooks/useRangeFilter';
 import { useProviders } from '../hooks/useProviders';
@@ -36,7 +37,7 @@ function RequestsTab({ range, rangeParams, configuredProviders }) {
   const [tagValues, setTagValues] = useState([]);
   const [tagValue, setTagValue] = useState('');
   const { apiFetch } = useApi();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const rangeKey = new URLSearchParams(rangeParams).toString();
 
   useEffect(() => {
@@ -245,14 +246,20 @@ function RequestsTab({ range, rangeParams, configuredProviders }) {
             </tr>
           ) : (data?.data || []).map(row => {
             const ok = row.status_code === 200;
+            const isSync = isSyncAdjustment(row);
             return (
               <tr key={row.id} onClick={() => setSelectedId(row.id)}>
-                <td className="col-muted col-mono">{fmtDateTime(row.timestamp)}</td>
+                <td className="col-muted col-mono">{isSync ? fmtDateYear(row.timestamp, i18n.language) : fmtDateTime(row.timestamp)}</td>
                 <td><ProviderBadge provider={row.provider} /></td>
                 <td className="col-mono">
                   {row.model}
                   {row.likely_retry_of && (
                     <span title={t('activity.likelyRetryHint', { id: row.likely_retry_of })} style={{ color: 'var(--warning)', marginLeft: 5, fontSize: 11, cursor: 'help' }}>↻</span>
+                  )}
+                  {isSync && (
+                    <span className="vbadge" title={t('activity.syncAdjustmentHint', { provider: labelFor(row.provider) })} style={{ marginLeft: 6, cursor: 'help', fontFamily: 'var(--font-sans)' }}>
+                      {t('activity.syncAdjustment')}
+                    </span>
                   )}
                 </td>
                 <td className="col-num">{parseInt(row.input_tokens || 0).toLocaleString()} / {parseInt(row.output_tokens || 0).toLocaleString()}</td>
@@ -262,7 +269,7 @@ function RequestsTab({ range, rangeParams, configuredProviders }) {
                     <span title={t('drawer.costUnknownHint')} style={{ color: 'var(--warning)', marginLeft: 4, fontSize: 10, cursor: 'help' }}>●</span>
                   )}
                 </td>
-                <td className="col-num col-muted">{fmtLatency(row.latency_ms)}</td>
+                <td className="col-num col-muted">{isSync ? '—' : fmtLatency(row.latency_ms)}</td>
                 <td>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                     <span className="dot" style={{ background: ok ? 'var(--success)' : 'var(--error)', width: 6, height: 6 }} />

@@ -212,6 +212,13 @@
     "lastLogin": "Last access"
   },
   "drawer": {
+    "syncTitle": "Sync adjustment",
+    "syncBody": "This row isn't a request. It's the difference between what {{provider}} reports as spent on {{day}} for {{model}} and what the SDK recorded that day. The sync adds it so your totals match what the provider bills.",
+    "syncCauses": "Common causes: cache tokens the SDK doesn't add to the cost, calls made outside the SDK (console, other apps using the same key) or small pricing differences. Fetching the provider's usage data is free.",
+    "syncRecalc": "It's recalculated on every sync: the current day's amount changes during the day, but it never stacks up.",
+    "syncTokenBreakdown": "Tokens the SDK did not record (approx.)",
+    "day": "Day",
+    "kind": "Type",
     "title": "Request detail",
     "metadata": "Metadata",
     "time": "Time",
@@ -380,6 +387,8 @@
     "unknownError": "Unknown"
   },
   "activity": {
+    "syncAdjustment": "Sync adjustment",
+    "syncAdjustmentHint": "Not an API call: it's spend {{provider}} reported for that day that the SDK didn't record. The sync adds it, and fetching it costs nothing.",
     "requestsTab": "Requests",
     "modelsTab": "Models",
     "searchPlaceholder": "Search by model or prompt…",
