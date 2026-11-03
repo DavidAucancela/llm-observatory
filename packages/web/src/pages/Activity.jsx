@@ -10,7 +10,7 @@ import { isSyncAdjustment } from '../utils/syncRows';
 import { useApi } from '../hooks/useApi';
 import { useRangeFilter } from '../hooks/useRangeFilter';
 import { useProviders } from '../hooks/useProviders';
-import { RANGE_PRESETS, buildRangeParams, customRangeError } from '../utils/dateRange';
+import { RANGE_PRESETS, buildRangeParams } from '../utils/dateRange';
 
 const RANGES = RANGE_PRESETS;
 
@@ -303,20 +303,19 @@ function RequestsTab({ range, rangeParams, configuredProviders }) {
 
 // ── Page ──────────────────────────────────────────────────────
 export default function Activity({ darkMode, onToggleDarkMode }) {
-  const { range, setRange, customRange, setCustomRange } = useRangeFilter('7d');
+  // Deep link from the Dashboard's "View requests" card: ?start=&end=
+  // (YYYY-MM-DD) opens this page on that custom range, so the TopBar shows
+  // what's filtered. It's the initial state, not a saved pick: the first
+  // fetch already uses it, and the other pages keep their own range.
+  const [searchParams] = useSearchParams();
+  const { range, setRange, customRange, setCustomRange } = useRangeFilter('7d', {
+    start: searchParams.get('start'),
+    end: searchParams.get('end'),
+  });
   const [configuredProviders, setConfiguredProviders] = useState([]);
   const { apiFetch } = useApi();
   const { t } = useTranslation();
   const rangeParams = buildRangeParams(range, customRange);
-
-  // Deep link from the Dashboard's 3D bar card: ?start=&end= (YYYY-MM-DD)
-  // becomes the shared custom range, so the TopBar shows what's filtered.
-  const [searchParams] = useSearchParams();
-  useEffect(() => {
-    const start = searchParams.get('start');
-    const end = searchParams.get('end');
-    if (start && end && customRangeError(start, end) === null) setCustomRange({ start, end });
-  }, []);
 
   useEffect(() => {
     apiFetch('/api/credentials')

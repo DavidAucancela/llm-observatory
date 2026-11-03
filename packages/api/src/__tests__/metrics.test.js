@@ -405,6 +405,49 @@ describe('GET /api/metrics/summary — org scoping', () => {
   });
 });
 
+describe('GET /api/metrics — comma-separated model filter', () => {
+  async function seedModels(obsToken) {
+    for (const model of ['claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-opus-4-1']) {
+      await request(app)
+        .post('/api/metrics')
+        .set('Authorization', `Bearer ${obsToken}`)
+        .send({ ...VALID_METRIC, model });
+    }
+  }
+
+  it('returns only the listed models', async () => {
+    const { obsToken, jwt } = await createOrg('Model Filter Org');
+    await seedModels(obsToken);
+    const res = await request(app)
+      .get('/api/metrics?range=24h&model=claude-sonnet-4-6, claude-haiku-4-5')
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(r => r.model).sort()).toEqual(['claude-haiku-4-5', 'claude-sonnet-4-6']);
+  });
+
+  it('still accepts a single model', async () => {
+    const { obsToken, jwt } = await createOrg('Single Model Org');
+    await seedModels(obsToken);
+    const res = await request(app)
+      .get('/api/metrics?range=24h&model=claude-opus-4-1')
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.map(r => r.model)).toEqual(['claude-opus-4-1']);
+  });
+
+  it('applies the same filter to the CSV export', async () => {
+    const { obsToken, jwt } = await createOrg('Export Model Filter Org');
+    await seedModels(obsToken);
+    const res = await request(app)
+      .get('/api/metrics/export?range=24h&model=claude-sonnet-4-6,claude-opus-4-1')
+      .set('Authorization', `Bearer ${jwt}`);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('claude-sonnet-4-6');
+    expect(res.text).toContain('claude-opus-4-1');
+    expect(res.text).not.toContain('claude-haiku-4-5');
+  });
+});
+
 describe('GET /api/metrics/export — CSV is RFC-4180 safe', () => {
   it('quotes fields containing newlines so one record stays on one row', async () => {
     const { obsToken, jwt } = await createOrg('CSV Export Org');
