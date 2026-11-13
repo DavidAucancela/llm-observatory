@@ -56,7 +56,7 @@ describe('Socket.io auth + org scoping', () => {
 
   it('rejects a revoked JWT', async () => {
     const { orgId, userId } = await createOrg('Revoked Socket');
-    const jti = crypto.randomUUID(); // revoked_tokens isn't truncated by resetDb
+    const jti = crypto.randomUUID();
     const token = jwt.sign({ id: userId, orgId, role: 'admin', jti }, process.env.JWT_SECRET, { expiresIn: '1h' });
     await pool.query(`INSERT INTO revoked_tokens (jti, exp) VALUES ($1, NOW() + INTERVAL '1 hour')`, [jti]);
     await expect(connect({ token })).rejects.toThrow('unauthorized');
