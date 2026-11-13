@@ -1,17 +1,21 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+// API_PROXY_TARGET lets the E2E run point the proxy at its own API port
+// without inlining a cross-origin VITE_API_URL into the client bundle.
+const apiTarget = process.env.API_PROXY_TARGET || process.env.VITE_API_URL || 'http://localhost:3001';
+
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
     proxy: {
       '/api': {
-        target: process.env.VITE_API_URL || 'http://localhost:3001',
+        target: apiTarget,
         changeOrigin: true
       },
       '/socket.io': {
-        target: process.env.VITE_API_URL || 'http://localhost:3001',
+        target: apiTarget,
         ws: true
       }
     }
