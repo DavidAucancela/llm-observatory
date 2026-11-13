@@ -5,24 +5,18 @@ const pool   = require('../db/pool');
 
 const JWT_SECRET = process.env.JWT_SECRET || '00'.repeat(64);
 
-// Truncate all tenant tables between tests (call in beforeEach)
+// Truncate every table between tests (call in beforeEach). The list comes
+// from the schema itself, so a new table can never be forgotten here and leak
+// rows from one test into the next. Looked up once per Jest worker.
+let tableList;
 async function resetDb() {
-  await pool.query(`
-    TRUNCATE TABLE
-      webhook_endpoints,
-      observatory_tokens,
-      alert_history, alert_rules,
-      sync_logs,
-      provider_credentials,
-      provider_balances,
-      budgets,
-      api_calls,
-      invitations,
-      org_members,
-      organizations,
-      users
-    RESTART IDENTITY CASCADE
-  `);
+  if (!tableList) {
+    const { rows } = await pool.query(
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`
+    );
+    tableList = rows.map(r => `"${r.tablename}"`).join(', ');
+  }
+  await pool.query(`TRUNCATE TABLE ${tableList} RESTART IDENTITY CASCADE`);
 }
 
 // Creates a fully active org with one admin user and one observatory token.
