@@ -31,3 +31,8 @@ notes/
 drafts/
 scratch/
 *.local.md
+
+# Playwright
+packages/web/playwright-report/
+packages/web/test-results/
+packages/web/e2e/.auth/
