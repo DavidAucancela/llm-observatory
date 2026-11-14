@@ -27,6 +27,6 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.js'],
     // Node 25+ ships a built-in localStorage that shadows jsdom's (and is
     // undefined without --localstorage-file); turn it off in test workers.
-    poolOptions: { forks: { execArgv: ['--no-experimental-webstorage'] } },
+    execArgv: ['--no-experimental-webstorage'],
   }
 });
