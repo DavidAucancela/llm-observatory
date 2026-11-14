@@ -16,6 +16,10 @@ const {
   fetchAnthropicRealCost, fetchOpenAIRealCost,
   fetchGrokUsage, fetchGrokRealCost,
 } = require('./providerUsage');
+const {
+  listOpenAIKeys, fetchOpenAIKeyUsage, disableOpenAIKey,
+  listAnthropicKeys, fetchAnthropicKeyUsage, disableAnthropicKey,
+} = require('./keyUsage');
 
 // realCost — the provider's own billed-dollar figure (ground truth).
 // usage     — token-level buckets, used both by sync and as reconciliation's
@@ -97,7 +101,33 @@ function syncableProviders() {
   return Object.keys(SYNC_PROVIDERS);
 }
 
+// ── services/keyWatch.js dispatch ────────────────────────────────────────────
+// Per-key audit: the org's key inventory, hourly usage grouped by key, and the
+// action behind the "Desactivar" button. Only providers whose capability says
+// `keyWatch` belong here (constants/providers.js); `volume` is what SDK
+// coverage is measured in — OpenAI reports request counts, Anthropic's usage
+// report only tokens. disableKey's effect is PROVIDER_CAPS[p].keyDisable.
+const KEY_WATCH_PROVIDERS = {
+  anthropic: {
+    volume: 'tokens',
+    listKeys:      (cred) => listAnthropicKeys(cred),
+    fetchKeyUsage: (cred, start, end) => fetchAnthropicKeyUsage(cred, start, end),
+    disableKey:    (cred, key) => disableAnthropicKey(cred, key),
+  },
+  openai: {
+    volume: 'requests',
+    listKeys:      (cred) => listOpenAIKeys(cred),
+    fetchKeyUsage: (cred, start, end) => fetchOpenAIKeyUsage(cred, start, end),
+    disableKey:    (cred, key) => disableOpenAIKey(cred, key),
+  },
+};
+
+function keyWatchFor(provider) {
+  return KEY_WATCH_PROVIDERS[provider] || null;
+}
+
 module.exports = {
   PROVIDER_BILLING, billingFor, reconcilableProviders,
   SYNC_PROVIDERS, syncableProviders,
+  KEY_WATCH_PROVIDERS, keyWatchFor,
 };

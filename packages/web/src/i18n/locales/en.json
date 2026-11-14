@@ -12,6 +12,8 @@
     "keys_desc": "API and Observatory tokens",
     "sync": "Sync",
     "sync_desc": "Import history by provider",
+    "security": "Security",
+    "security_desc": "What each API key did, per the provider",
     "settings": "Settings",
     "settings_desc": "Account, alerts and webhooks"
   },
@@ -122,7 +124,10 @@
     "teamJoinedMsg": "{{email}} accepted the team invitation",
     "syncFailingMsg": "{{provider}} sync failed {{failures}} times in a row",
     "syncFailingAuth": "{{provider}} is rejecting the admin key: sync failed {{failures}} times in a row",
-    "syncUnpricedMsg": "{{provider}}: usage of models with no price ({{models}}), that cost isn't counted"
+    "syncUnpricedMsg": "{{provider}}: usage of models with no price ({{models}}), that cost isn't counted",
+    "keyAlertMsg": "{{title}} — {{key}} ({{provider}})",
+    "keyWatchFailingMsg": "{{provider}} key audit failed {{failures}} times in a row",
+    "keyWatchFailingAuth": "{{provider}} rejects the admin key: its keys aren't being watched ({{failures}} failures in a row)"
   },
   "auth": {
     "brand": "Observatory",
@@ -761,6 +766,144 @@
       "interrupted": "Interrupted (the server restarted before it finished). The next automatic sync will complete it.",
       "empty": "The provider returned no data for that range; nothing was changed.",
       "skipped_models": "Models with no price, skipped: {{models}}",
+      "connection": "Couldn't reach the server."
+    }
+  },
+  "security": {
+    "title": "Key security",
+    "loadError": "Couldn't load the key audit.",
+    "auto": {
+      "on": "Key watch on · checks every hour",
+      "off": "Automatic watch disabled (KEY_WATCH_ENABLED=false)",
+      "noProviders": "No keys watched yet",
+      "sub": "Compares what each key did according to the provider with what the SDK recorded, to catch keys used outside their project."
+    },
+    "provider": {
+      "noKey": "{{provider}}: no admin key, its keys aren't watched",
+      "addKey": "Add admin key",
+      "never": "{{provider}}: not checked yet",
+      "running": "{{provider}}: checking…",
+      "ok": "{{provider}}: checked {{when}} · {{keys}} keys",
+      "failed": "{{provider}}: last check failed {{when}} — {{reason}}"
+    },
+    "run": {
+      "button": "Check now",
+      "running": "Checking…",
+      "done": "{{provider}}: check complete · {{count}} new finding(s)",
+      "nothing": "No providers with an admin key to check."
+    },
+    "findings": {
+      "title": "Open findings ({{count}})",
+      "none": "No open findings: keys are behaving as usual.",
+      "notWatching": "Add an OpenAI or Anthropic admin key in Keys to watch its keys.",
+      "ack": "Mark reviewed",
+      "acked": "reviewed",
+      "viewKey": "View key",
+      "openCount": "{{count}} open finding(s)"
+    },
+    "keys": {
+      "title": "Provider keys ({{count}})",
+      "empty": "No keys yet: they appear after the first check.",
+      "footnote": "Usage and cost as reported by the provider; cost is a token-based estimate (images and audio aren't priced here). Coverage = share of that usage the SDK also recorded."
+    },
+    "cols": {
+      "key": "Key",
+      "project": "Project",
+      "lastUse": "Last used",
+      "day": "24 h",
+      "week": "7 days",
+      "coverage": "SDK coverage",
+      "coverageHelp": "The SDK recorded {{sdk}} of {{total}}",
+      "status": "Status"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "archived": "Archived",
+      "expired": "Expired",
+      "deleted": "Deleted",
+      "missing": "No longer listed"
+    },
+    "link": {
+      "none": "Not linked",
+      "expected": "No SDK (expected)",
+      "manual": "Manually linked to an SDK credential",
+      "credential": "Matches a registered SDK credential",
+      "sdk": "Used through the SDK (matches recent metrics)"
+    },
+    "detail": {
+      "usage7d": "Usage, last 7 days",
+      "observatory": "In the Observatory",
+      "linkLabel": "Link to SDK credential",
+      "linkNone": "— none —",
+      "expected": "This key is used without the SDK on purpose (n8n, tools…): don't flag unrecorded usage",
+      "events": "Finding history",
+      "noEvents": "No findings for this key.",
+      "historical": "historical"
+    },
+    "usage": {
+      "requests": "{{count}} req",
+      "tokens": "{{count}} tok",
+      "images": "{{count}} img",
+      "unpriced": "+ unpriced",
+      "none": "No usage in 7 days",
+      "never": "Never"
+    },
+    "kinds": {
+      "completions": "text",
+      "images": "images",
+      "embeddings": "embeddings",
+      "audio_speeches": "speech (TTS)",
+      "audio_transcriptions": "transcription",
+      "messages": "messages"
+    },
+    "events": {
+      "key_unmonitored_usage": "Usage the SDK didn't record",
+      "key_new_capability": "Did something it never did before",
+      "key_spend_spike": "Spend spike",
+      "key_unknown": "Key the Observatory doesn't know",
+      "key_dormant_active": "Dormant key used again",
+      "key_disabled": "Disabled from the Observatory"
+    },
+    "eventDetail": {
+      "newKinds": "new: {{kinds}}",
+      "newModels": "new models: {{models}}",
+      "coverage": "the SDK saw {{pct}}% ({{sdk}} of {{total}})",
+      "spike": "peak hour ~{{peak}} (previous week's max ~{{base}})",
+      "dormant": "previous use: {{date}}",
+      "disabledBy": "by {{by}}"
+    },
+    "disable": {
+      "button": "Disable",
+      "deleteButton": "Delete key",
+      "working": "Working…",
+      "hintDeactivate": "Deactivates the key at {{provider}}. It can be re-enabled from its console.",
+      "hintDelete": "OpenAI can't disable keys through its API: this button deletes it (irreversible).",
+      "titleDeactivate": "Disable {{name}} at {{provider}}",
+      "titleDelete": "Delete {{name}} at {{provider}}",
+      "bodyDeactivate": "The key stops working at {{provider}} immediately. It can be re-enabled from the {{provider}} console.",
+      "bodyDelete": "OpenAI can't disable keys through its API: this DELETES it and can't be undone. Every project using it will stop working.",
+      "typeToConfirm": "Type {{name}} to confirm",
+      "done": "{{name}} disabled",
+      "doneDelete": "{{name}} deleted at OpenAI"
+    },
+    "codes": {
+      "provider_forbidden": "The {{provider}} admin key isn't allowed to change keys.",
+      "confirm_mismatch": "The name doesn't match.",
+      "already_disabled": "The key is already disabled.",
+      "already_running": "A check is already running; wait for it to finish.",
+      "missing_admin_key": "{{provider}} admin key missing.",
+      "provider_auth": "{{provider}} rejected the admin key",
+      "provider_rate_limit": "{{provider}} rate-limited us; the next check retries",
+      "provider_unavailable": "{{provider}} didn't respond (provider error)",
+      "provider_unreachable": "Couldn't reach {{provider}}",
+      "provider_lookback": "{{provider}} doesn't return usage that old",
+      "watch_failed": "The check failed",
+      "disable_failed": "The provider rejected the operation",
+      "interrupted": "Interrupted by a server restart",
+      "not_found": "Not found.",
+      "not_supported": "This provider doesn't support this action.",
+      "invalid_credential": "That credential isn't an SDK key of this provider.",
       "connection": "Couldn't reach the server."
     }
   }

@@ -2758,3 +2758,37 @@ body {
   .sync-plan-row { grid-template-columns: 18px 1fr; }
   .sync-plan-row .sync-plan-text { grid-column: 1 / -1; }
 }
+
+/* ── Key security page (pages/Security.jsx) — reuses the sync-* layout ── */
+.sec-event {
+  display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: start;
+  padding: 10px 0; border-bottom: 1px solid var(--border-soft); font-size: 12px;
+}
+.sec-event-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sec-event-title { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+.sec-event-actions { display: flex; align-items: center; gap: 10px; }
+.sec-table td { vertical-align: middle; }
+.sec-table tbody td { height: auto; padding-top: 8px; padding-bottom: 8px; }
+.sec-table tr.is-open td { background: var(--hover); }
+.sec-table tr.is-focus td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+.sec-keyname { display: flex; align-items: center; gap: 6px; font-weight: 500; }
+.sec-keymeta { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.sec-table td.sec-usage { white-space: normal; min-width: 110px; max-width: 190px; line-height: 1.4; }
+.sec-keymeta .sync-sub { white-space: nowrap; }
+.sec-coverage { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; }
+.sec-coverage .iprog-bar { flex: 0 0 60px; }
+.sec-coverage .iprog-fill { display: block; }
+.sec-table tbody tr.sec-detail-row td { white-space: normal; cursor: default; }
+.sec-table tbody tr.sec-detail-row:hover td { background: transparent; cursor: default; }
+.sec-detail { padding: 6px 0 12px; }
+.sec-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.sec-models { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; }
+.sec-controls { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; max-width: 360px; }
+.sec-toggle { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.sec-toggle .tsw { margin-top: 1px; }
+
+@media (max-width: 767px) {
+  .sec-detail-grid { grid-template-columns: 1fr; }
+  .sec-event { grid-template-columns: 10px 1fr; }
+  .sec-event-actions { grid-column: 2; }
+}

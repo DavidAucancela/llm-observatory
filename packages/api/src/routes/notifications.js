@@ -22,7 +22,7 @@ router.get('/', async (req, res) => {
   try {
     const { orgId, id: userId } = req.user;
 
-    const [alerts, reconciliations, joins, readRow, insights, dismissed, syncs] = await Promise.all([
+    const [alerts, reconciliations, joins, readRow, insights, dismissed, syncs, keyEvents, keyWatchFails] = await Promise.all([
       pool.query(
         `SELECT id, provider, current_value, threshold_usd, success, sent_at
          FROM alert_history WHERE org_id = $1 ORDER BY sent_at DESC LIMIT $2`,
@@ -54,6 +54,24 @@ router.get('/', async (req, res) => {
          WHERE org_id = $1 AND completed_at IS NOT NULL
            AND (details->>'alert' = 'repeated_failure'
                 OR jsonb_array_length(COALESCE(details->'new_skipped_models', '[]'::jsonb)) > 0)
+         ORDER BY completed_at DESC LIMIT $2`,
+        [orgId, MAX_NOTIFICATIONS]
+      ),
+      // Key audit findings (services/keyWatch.js) still open. Historical ones
+      // (found by the first backfill, about the past) and the 'key_disabled'
+      // audit rows only live on /security.
+      pool.query(
+        `SELECT e.id, e.provider, e.key_id, e.type, e.severity, e.day, e.details, e.created_at,
+                k.name AS key_name, k.project_name
+         FROM key_events e
+         LEFT JOIN provider_keys k ON k.org_id = e.org_id AND k.provider = e.provider AND k.key_id = e.key_id
+         WHERE e.org_id = $1 AND e.historical = false AND e.acknowledged_at IS NULL AND e.type <> 'key_disabled'
+         ORDER BY e.created_at DESC LIMIT $2`,
+        [orgId, MAX_NOTIFICATIONS]
+      ),
+      pool.query(
+        `SELECT id, provider, error_code, details, completed_at FROM key_watch_runs
+         WHERE org_id = $1 AND completed_at IS NOT NULL AND details->>'alert' = 'repeated_failure'
          ORDER BY completed_at DESC LIMIT $2`,
         [orgId, MAX_NOTIFICATIONS]
       ),
@@ -106,6 +124,41 @@ router.get('/', async (req, res) => {
           },
         };
       }),
+      ...keyEvents.rows.map(r => ({
+        id: `key_alert:${r.id}`,
+        type: 'key_alert',
+        occurred_at: r.created_at,
+        data: {
+          eventId: r.id,
+          eventType: r.type,
+          severity: r.severity,
+          provider: r.provider,
+          providerLabel: PROVIDER_LABELS[r.provider] || r.provider,
+          keyId: r.key_id,
+          keyName: r.key_name || r.details?.key_name || null,
+          projectName: r.project_name || null,
+          day: r.day,
+          requests: r.details?.requests ?? null,
+          images: r.details?.images ?? 0,
+          estCostUsd: r.details?.est_cost_usd ?? 0,
+          unpriced: Boolean(r.details?.unpriced),
+          newKinds: r.details?.new_kinds || [],
+          coveragePct: r.details?.coverage_pct ?? null,
+          details: r.details || {},
+        },
+      })),
+      ...keyWatchFails.rows.map(r => ({
+        id: `key_watch_failing:${r.id}`,
+        type: 'key_watch_failing',
+        occurred_at: r.completed_at,
+        data: {
+          provider: r.provider,
+          providerLabel: PROVIDER_LABELS[r.provider] || r.provider,
+          failures: r.details?.failures,
+          errorCode: r.error_code,
+          discord: r.details?.discord ?? null,
+        },
+      })),
       ...insights
         .filter(i => !dismissedKeys.has(i.insight_key))
         .map(i => ({

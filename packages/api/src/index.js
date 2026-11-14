@@ -21,6 +21,7 @@ const pool = require('./db/pool');
 const { retentionDays } = require('./utils/retention');
 const { markStaleRuns, refreshAll, autoSyncEnabled, setSyncEmitter, AUTO_SYNC_CRON } = require('./services/syncRunner');
 const { socketAuth, emitToOrg } = require('./services/realtime');
+const { keyWatchAll, markStaleKeyWatchRuns, setKeyWatchEmitter, autoKeyWatchEnabled, KEY_WATCH_CRON } = require('./services/keyWatch');
 const logger = require('./logger');
 const { authMiddleware } = require('./middleware/auth');
 
@@ -39,6 +40,7 @@ const reconciliationRouter = require('./routes/reconciliation');
 const insightsRouter    = require('./routes/insights');
 const notificationsRouter = require('./routes/notifications');
 const evaluationsRouter = require('./routes/evaluations');
+const keyWatchRouter    = require('./routes/keyWatch');
 const { checkAlerts }   = require('./jobs/alertChecker');
 const { runReconciliation } = require('./jobs/reconciliation');
 const { seedDemo }      = require('./db/seed-demo');
@@ -69,6 +71,8 @@ app.set('io', io);
 io.use(socketAuth);
 // Sync progress/status → the Sync page (replaces its 4 s polling).
 setSyncEmitter((orgId, payload) => emitToOrg(io, orgId, 'sync-update', payload));
+// New key-audit findings → the bell refetches (payload carries no data).
+setKeyWatchEmitter((orgId, payload) => emitToOrg(io, orgId, 'key-alert', payload));
 
 // ── Rate limiters ─────────────────────────────────────────────────────────────
 // General API: 1000 req/min per IP
@@ -113,6 +117,7 @@ app.use('/api/reconciliation', reconciliationRouter);
 app.use('/api/insights', insightsRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/evaluations', evaluationsRouter);
+app.use('/api/key-watch', keyWatchRouter);
 
 // ── 404 handler — must be after all routes ────────────────────────────────────
 app.use((req, res) => {
@@ -178,6 +183,13 @@ async function startServer() {
   } catch (err) {
     logger.error('Stale sync cleanup failed:', err.message);
   }
+  // Same for key-audit runs (services/keyWatch.js).
+  try {
+    const n = await markStaleKeyWatchRuns({ all: true });
+    if (n > 0) logger.info(`🧹 Marked ${n} interrupted key watch run(s)`);
+  } catch (err) {
+    logger.error('Stale key watch cleanup failed:', err.message);
+  }
 
   if (process.env.AUTH_EMAIL && process.env.AUTH_PASSWORD_HASH) {
     try {
@@ -242,6 +254,11 @@ async function startServer() {
         [days]
       );
       if (result.rowCount > 0) logger.info(`Data retention: deleted ${result.rowCount} records older than ${days} days`);
+      // Key audit: hourly usage and findings follow the same retention; run
+      // logs are only operational, 90 days is plenty.
+      await pool.query(`DELETE FROM key_usage_hourly WHERE hour < NOW() - ($1 || ' days')::interval`, [days]);
+      await pool.query(`DELETE FROM key_events WHERE day < (NOW() - ($1 || ' days')::interval)::date`, [days]);
+      await pool.query(`DELETE FROM key_watch_runs WHERE started_at < NOW() - INTERVAL '90 days'`);
     } catch (err) {
       logger.error('Data retention job failed:', err.message);
     }
@@ -259,6 +276,23 @@ async function startServer() {
         logger.info(`Auto-sync: ${started} run(s), ${results.length - started} skipped`);
       } catch (err) {
         logger.error('Auto-sync failed:', err.message);
+      }
+    });
+  }
+
+  // Cron: key audit — every hour at :45, asks OpenAI/Anthropic what each API
+  // key did and compares it with what the SDK recorded (services/keyWatch.js).
+  // KEY_WATCH_ENABLED=false turns it off.
+  if (autoKeyWatchEnabled()) {
+    cron.schedule(KEY_WATCH_CRON, async () => {
+      try {
+        const results = await keyWatchAll({ trigger: 'auto' });
+        if (results.locked) { logger.info('Key watch: another instance is running it, skipped'); return; }
+        const fresh = results.reduce((a, r) => a + (r.new_events || 0), 0);
+        const failed = results.filter(r => r.status === 'error').length;
+        logger.info(`Key watch: ${results.length} provider(s), ${fresh} new finding(s), ${failed} failed`);
+      } catch (err) {
+        logger.error('Key watch failed:', err.message);
       }
     });
   }

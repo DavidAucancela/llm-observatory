@@ -60,6 +60,14 @@ function IconFinance() {
   );
 }
 
+function IconShield() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
+
 function IconSettings() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -96,6 +104,7 @@ const navDefs = [
   { to: '/finance',   labelKey: 'nav.finance',  descKey: 'nav.finance_desc',  Icon: IconFinance  },
   { to: '/keys',      labelKey: 'nav.keys',     descKey: 'nav.keys_desc',     Icon: IconKey      },
   { to: '/sync',      labelKey: 'nav.sync',     descKey: 'nav.sync_desc',     Icon: IconSync     },
+  { to: '/security',  labelKey: 'nav.security', descKey: 'nav.security_desc', Icon: IconShield   },
   { to: '/settings',  labelKey: 'nav.settings', descKey: 'nav.settings_desc', Icon: IconSettings },
 ];
 

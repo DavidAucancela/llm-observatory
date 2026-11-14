@@ -426,3 +426,96 @@ CREATE INDEX IF NOT EXISTS idx_evaluations_org      ON evaluations(org_id, creat
 --    Generic name, not xai_team_id, so the next provider whose billing API is
 --    scoped by an org/project id reuses the column instead of adding one. ────
 ALTER TABLE provider_credentials ADD COLUMN IF NOT EXISTS provider_account_id VARCHAR(120);
+
+-- ── Key audit (services/keyWatch.js) — per-API-key usage read from the
+--    provider's admin API and compared against what the SDK recorded, to catch
+--    a key used OUTSIDE its project (2026-11-03: ~$3.30 of gpt-image usage on a
+--    code-review key that the SDK never saw). Nothing here touches api_calls:
+--    this is an audit layer, the dashboard's spend must not double-count it. ──
+
+-- Inventory of the org's keys as the provider lists them. hint_tail (last 4
+-- chars of the redacted key) is how a key is matched to the SDK's api_key_hint
+-- and provider_credentials.key_hint; ambiguous tails are only linked manually
+-- (linked_credential_id). expected_unmonitored silences coverage alerts for a
+-- key that legitimately runs without the SDK (n8n, a no-code tool…).
+CREATE TABLE IF NOT EXISTS provider_keys (
+  id                     SERIAL PRIMARY KEY,
+  org_id                 INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  provider               VARCHAR(50) NOT NULL,
+  key_id                 VARCHAR(120) NOT NULL,
+  name                   VARCHAR(200),
+  redacted_hint          VARCHAR(120),
+  hint_tail              VARCHAR(8),
+  project_id             VARCHAR(120),
+  project_name           VARCHAR(200),
+  status                 VARCHAR(20) NOT NULL DEFAULT 'active', -- provider status | 'missing' (no longer listed) | 'deleted'
+  provider_created_at    TIMESTAMPTZ,
+  provider_last_used_at  TIMESTAMPTZ,
+  first_seen_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  linked_credential_id   INTEGER REFERENCES provider_credentials(id) ON DELETE SET NULL,
+  expected_unmonitored   BOOLEAN NOT NULL DEFAULT false,
+  UNIQUE (org_id, provider, key_id)
+);
+
+-- Hourly usage per key, as the provider reports it. Upserted, so re-reading
+-- recent hours (usage lands with a delay) is idempotent. est_cost_usd is a
+-- token-based estimate (pricingBridge); NULL = not priced (images, audio).
+CREATE TABLE IF NOT EXISTS key_usage_hourly (
+  org_id         INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  provider       VARCHAR(50) NOT NULL,
+  key_id         VARCHAR(120) NOT NULL,
+  hour           TIMESTAMPTZ NOT NULL,
+  kind           VARCHAR(30) NOT NULL,  -- completions | images | embeddings | audio_* | messages
+  model          VARCHAR(150) NOT NULL,
+  requests       INTEGER,               -- NULL for Anthropic (no request count in its usage report)
+  input_tokens   BIGINT NOT NULL DEFAULT 0,
+  cached_tokens  BIGINT NOT NULL DEFAULT 0,
+  output_tokens  BIGINT NOT NULL DEFAULT 0,
+  images         INTEGER NOT NULL DEFAULT 0,
+  est_cost_usd   DECIMAL(10, 6),
+  PRIMARY KEY (org_id, provider, key_id, hour, kind, model)
+);
+CREATE INDEX IF NOT EXISTS idx_key_usage_org_hour ON key_usage_hourly(org_id, provider, hour);
+
+-- Findings. At most one row per (key, type, UTC day): a problem that persists
+-- updates its row instead of re-notifying. historical = found by the first
+-- backfill about the past — listed on /security, never pushed to bell/Discord.
+-- 'key_disabled' rows are the audit trail of the Desactivar button.
+CREATE TABLE IF NOT EXISTS key_events (
+  id               SERIAL PRIMARY KEY,
+  org_id           INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  provider         VARCHAR(50) NOT NULL,
+  key_id           VARCHAR(120) NOT NULL,
+  type             VARCHAR(40) NOT NULL,
+  severity         VARCHAR(10) NOT NULL DEFAULT 'medium', -- high | medium
+  day              DATE NOT NULL,
+  first_hour       TIMESTAMPTZ,
+  last_hour        TIMESTAMPTZ,
+  details          JSONB NOT NULL DEFAULT '{}'::jsonb,
+  historical       BOOLEAN NOT NULL DEFAULT false,
+  discord          BOOLEAN,
+  acknowledged_at  TIMESTAMPTZ,
+  acknowledged_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (org_id, provider, key_id, type, day)
+);
+CREATE INDEX IF NOT EXISTS idx_key_events_org ON key_events(org_id, created_at DESC);
+
+-- One row per watch run (cron, "Revisar ahora", first backfill). The partial
+-- unique index allows a single 'running' row per (org, provider).
+CREATE TABLE IF NOT EXISTS key_watch_runs (
+  id            SERIAL PRIMARY KEY,
+  org_id        INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  provider      VARCHAR(50) NOT NULL,
+  trigger       VARCHAR(10) NOT NULL DEFAULT 'auto', -- auto | manual | backfill
+  status        VARCHAR(20) NOT NULL DEFAULT 'running', -- running | ok | error | interrupted
+  error_code    VARCHAR(40),
+  error_message TEXT,
+  details       JSONB NOT NULL DEFAULT '{}'::jsonb,
+  started_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at  TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_key_watch_one_running ON key_watch_runs(org_id, provider) WHERE status = 'running';
+CREATE INDEX IF NOT EXISTS idx_key_watch_runs_org ON key_watch_runs(org_id, provider, started_at DESC);

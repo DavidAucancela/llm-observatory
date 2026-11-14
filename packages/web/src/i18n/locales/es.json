@@ -12,6 +12,8 @@
     "keys_desc": "Claves API y tokens de Observatory",
     "sync": "Sincronización",
     "sync_desc": "Historial de importación por proveedor",
+    "security": "Seguridad",
+    "security_desc": "Qué hizo cada clave API, según el proveedor",
     "settings": "Ajustes",
     "settings_desc": "Cuenta, alertas y webhooks"
   },
@@ -122,7 +124,10 @@
     "teamJoinedMsg": "{{email}} aceptó la invitación al equipo",
     "syncFailingMsg": "La sincronización de {{provider}} falló {{failures}} veces seguidas",
     "syncFailingAuth": "{{provider}} rechaza la admin key: la sincronización falló {{failures}} veces seguidas",
-    "syncUnpricedMsg": "{{provider}}: uso de modelos sin precio ({{models}}), ese costo no se contabiliza"
+    "syncUnpricedMsg": "{{provider}}: uso de modelos sin precio ({{models}}), ese costo no se contabiliza",
+    "keyAlertMsg": "{{title}} — {{key}} ({{provider}})",
+    "keyWatchFailingMsg": "La auditoría de claves de {{provider}} falló {{failures}} veces seguidas",
+    "keyWatchFailingAuth": "{{provider}} rechaza la admin key: no se están vigilando sus claves ({{failures}} fallos seguidos)"
   },
   "auth": {
     "brand": "Observatory",
@@ -762,6 +767,144 @@
       "empty": "El proveedor no devolvió datos para ese rango; no se tocó nada.",
       "skipped_models": "Modelos sin precio, omitidos: {{models}}",
       "connection": "Error de conexión con el servidor."
+    }
+  },
+  "security": {
+    "title": "Seguridad de claves",
+    "loadError": "No se pudo cargar la auditoría de claves.",
+    "auto": {
+      "on": "Vigilancia de claves activa · revisa cada hora",
+      "off": "Vigilancia automática desactivada (KEY_WATCH_ENABLED=false)",
+      "noProviders": "Ninguna clave vigilada todavía",
+      "sub": "Compara lo que cada clave hizo según el proveedor con lo que registró el SDK, para detectar claves usadas fuera de su proyecto."
+    },
+    "provider": {
+      "noKey": "{{provider}}: sin admin key, sus claves no se vigilan",
+      "addKey": "Agregar admin key",
+      "never": "{{provider}}: aún no revisado",
+      "running": "{{provider}}: revisando…",
+      "ok": "{{provider}}: revisado {{when}} · {{keys}} claves",
+      "failed": "{{provider}}: la última revisión falló {{when}} — {{reason}}"
+    },
+    "run": {
+      "button": "Revisar ahora",
+      "running": "Revisando…",
+      "done": "{{provider}}: revisión completa · {{count}} hallazgo(s) nuevo(s)",
+      "nothing": "No hay proveedores con admin key para revisar."
+    },
+    "findings": {
+      "title": "Hallazgos abiertos ({{count}})",
+      "none": "Sin hallazgos abiertos: las claves se comportan como siempre.",
+      "notWatching": "Agrega una admin key de OpenAI o Anthropic en Claves para vigilar sus claves.",
+      "ack": "Marcar revisado",
+      "acked": "revisado",
+      "viewKey": "Ver clave",
+      "openCount": "{{count}} hallazgo(s) abierto(s)"
+    },
+    "keys": {
+      "title": "Claves del proveedor ({{count}})",
+      "empty": "Todavía no hay claves: aparecen tras la primera revisión.",
+      "footnote": "Uso y costo según el proveedor; el costo es una estimación por tokens (imágenes y audio no tienen precio aquí). Cobertura = parte de ese uso que también registró el SDK."
+    },
+    "cols": {
+      "key": "Clave",
+      "project": "Proyecto",
+      "lastUse": "Último uso",
+      "day": "24 h",
+      "week": "7 días",
+      "coverage": "Cobertura SDK",
+      "coverageHelp": "El SDK registró {{sdk}} de {{total}}",
+      "status": "Estado"
+    },
+    "status": {
+      "active": "Activa",
+      "inactive": "Inactiva",
+      "archived": "Archivada",
+      "expired": "Expirada",
+      "deleted": "Borrada",
+      "missing": "Ya no listada"
+    },
+    "link": {
+      "none": "Sin vincular",
+      "expected": "Sin SDK (esperado)",
+      "manual": "Vinculada a mano a una credencial SDK",
+      "credential": "Coincide con una credencial SDK registrada",
+      "sdk": "El SDK la usa (coincide con métricas recientes)"
+    },
+    "detail": {
+      "usage7d": "Uso en 7 días",
+      "observatory": "En el Observatory",
+      "linkLabel": "Vincular a credencial SDK",
+      "linkNone": "— ninguna —",
+      "expected": "Esta clave se usa sin el SDK a propósito (n8n, herramientas…): no avisar de uso no registrado",
+      "events": "Historial de hallazgos",
+      "noEvents": "Sin hallazgos para esta clave.",
+      "historical": "histórico"
+    },
+    "usage": {
+      "requests": "{{count}} pet.",
+      "tokens": "{{count}} tok",
+      "images": "{{count}} img",
+      "unpriced": "+ sin precio",
+      "none": "Sin uso en 7 días",
+      "never": "Nunca"
+    },
+    "kinds": {
+      "completions": "texto",
+      "images": "imágenes",
+      "embeddings": "embeddings",
+      "audio_speeches": "voz (TTS)",
+      "audio_transcriptions": "transcripción",
+      "messages": "mensajes"
+    },
+    "events": {
+      "key_unmonitored_usage": "Uso que el SDK no registró",
+      "key_new_capability": "Hizo algo que nunca había hecho",
+      "key_spend_spike": "Pico de gasto",
+      "key_unknown": "Clave que el Observatory no conoce",
+      "key_dormant_active": "Clave inactiva volvió a usarse",
+      "key_disabled": "Desactivada desde el Observatory"
+    },
+    "eventDetail": {
+      "newKinds": "nuevo: {{kinds}}",
+      "newModels": "modelos nuevos: {{models}}",
+      "coverage": "el SDK vio el {{pct}}% ({{sdk}} de {{total}})",
+      "spike": "hora pico ~{{peak}} (máximo de la semana anterior ~{{base}})",
+      "dormant": "último uso anterior: {{date}}",
+      "disabledBy": "por {{by}}"
+    },
+    "disable": {
+      "button": "Desactivar",
+      "deleteButton": "Borrar clave",
+      "working": "Procesando…",
+      "hintDeactivate": "Desactiva la clave en {{provider}}. Se puede reactivar desde su consola.",
+      "hintDelete": "OpenAI no permite desactivar claves por API: el botón la borra (irreversible).",
+      "titleDeactivate": "Desactivar {{name}} en {{provider}}",
+      "titleDelete": "Borrar {{name}} en {{provider}}",
+      "bodyDeactivate": "La clave dejará de funcionar en {{provider}} de inmediato. Se puede reactivar desde la consola de {{provider}}.",
+      "bodyDelete": "OpenAI no permite desactivar claves por API: esto la BORRA y no se puede deshacer. Todo proyecto que la use dejará de funcionar.",
+      "typeToConfirm": "Escribe {{name}} para confirmar",
+      "done": "{{name}} desactivada",
+      "doneDelete": "{{name}} borrada en OpenAI"
+    },
+    "codes": {
+      "provider_forbidden": "La admin key de {{provider}} no tiene permiso para modificar claves.",
+      "confirm_mismatch": "El nombre no coincide.",
+      "already_disabled": "La clave ya está desactivada.",
+      "already_running": "Ya hay una revisión en curso; espera a que termine.",
+      "missing_admin_key": "Falta la admin key de {{provider}}.",
+      "provider_auth": "{{provider}} rechazó la admin key",
+      "provider_rate_limit": "{{provider}} limitó las peticiones; se reintenta en la próxima revisión",
+      "provider_unavailable": "{{provider}} no respondió (error del proveedor)",
+      "provider_unreachable": "No se pudo conectar con {{provider}}",
+      "provider_lookback": "{{provider}} no entrega uso tan antiguo",
+      "watch_failed": "La revisión falló",
+      "disable_failed": "El proveedor rechazó la operación",
+      "interrupted": "Se interrumpió por un reinicio del servidor",
+      "not_found": "No encontrado.",
+      "not_supported": "Este proveedor no permite esta acción.",
+      "invalid_credential": "Esa credencial no es una clave SDK de este proveedor.",
+      "connection": "No se pudo conectar con el servidor."
     }
   }
 }
