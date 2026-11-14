@@ -27,17 +27,25 @@
 //                 start older than one year, failing the whole sync; the sync
 //                 window is trimmed to this instead (services/syncWindow.js).
 //                 null = no known limit.
+//   keyWatch    — the provider's usage API can be grouped by API key and its
+//                 admin API lists the org's keys, so services/keyWatch.js can
+//                 compare each key's real usage against what the SDK recorded
+//                 (usage "in the shadow" — a key used outside its project).
+//   keyDisable  — how POST /api/key-watch/keys/:id/disable acts on a key:
+//                 'deactivate' (reversible — Anthropic sets status inactive),
+//                 'delete' (OpenAI's admin API can only DELETE a project key,
+//                 there is no disable) or null (not supported).
 
 const PROVIDER_CAPS = {
-  anthropic: { adminKey: true,  sync: true,  reconcile: true,  liveBalance: false, accountId: 'none', syncLookbackDays: null },
-  openai:    { adminKey: true,  sync: true,  reconcile: true,  liveBalance: false, accountId: 'none', syncLookbackDays: 365 },
-  gemini:    { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none', syncLookbackDays: null },
-  grok:      { adminKey: true,  sync: true,  reconcile: true,  liveBalance: true,  accountId: 'required', syncLookbackDays: null },
-  kimi:      { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none', syncLookbackDays: null },
+  anthropic: { adminKey: true,  sync: true,  reconcile: true,  liveBalance: false, accountId: 'none', syncLookbackDays: null, keyWatch: true,  keyDisable: 'deactivate' },
+  openai:    { adminKey: true,  sync: true,  reconcile: true,  liveBalance: false, accountId: 'none', syncLookbackDays: 365, keyWatch: true,  keyDisable: 'delete' },
+  gemini:    { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none', syncLookbackDays: null, keyWatch: false, keyDisable: null },
+  grok:      { adminKey: true,  sync: true,  reconcile: true,  liveBalance: true,  accountId: 'required', syncLookbackDays: null, keyWatch: false, keyDisable: null },
+  kimi:      { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none', syncLookbackDays: null, keyWatch: false, keyDisable: null },
   // DeepInfra's only billing endpoint is per-request (POST /v1/request-costs by
   // request id); there is no org-level usage/cost listing to sync or reconcile
   // against, so like Kimi it is SDK-metrics only.
-  deepinfra: { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none', syncLookbackDays: null },
+  deepinfra: { adminKey: false, sync: false, reconcile: false, liveBalance: false, accountId: 'none', syncLookbackDays: null, keyWatch: false, keyDisable: null },
 };
 
 // Ordered: anthropic and openai first because every "which provider?" dropdown
@@ -70,6 +78,10 @@ function requiresAccountId(provider) {
   return PROVIDER_CAPS[provider]?.accountId === 'required';
 }
 
+function keyDisableMode(provider) {
+  return PROVIDER_CAPS[provider]?.keyDisable || null;
+}
+
 function isKnownProvider(provider) {
   return Object.prototype.hasOwnProperty.call(PROVIDER_CAPS, provider);
 }
@@ -81,5 +93,6 @@ module.exports = {
   ADMIN_KEY_HELP,
   providersWith,
   requiresAccountId,
+  keyDisableMode,
   isKnownProvider,
 };

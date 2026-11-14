@@ -2,9 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useApi } from '../hooks/useApi';
+import { useSocket } from '../hooks/useSocket';
 import { fmtRelative, formatCost } from '../utils/fmt';
 import { SEVERITY_COLOR, severityLabel, titleAndDetail } from '../utils/insightFormat';
 import Sparkline from './Sparkline';
+import { eventTitle, eventReason, usageSummary, severityColor } from '../utils/keyWatchFormat';
 
 function IconBell() {
   return (
@@ -32,6 +34,13 @@ function TypeIcon({ type, insightType }) {
       </svg>
     );
   }
+  if (type === 'key_alert' || type === 'key_watch_failing') {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M12 8v4" /><path d="M12 16h.01" />
+      </svg>
+    );
+  }
   if (type === 'reconciliation') {
     return (
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -51,6 +60,8 @@ function notifSeverityColor(n) {
   if (n.type === 'reconciliation') return n.data.status === 'error' ? 'var(--error)' : 'var(--warning)';
   if (n.type === 'insight') return SEVERITY_COLOR[n.data.severity];
   if (n.type === 'sync_failing') return 'var(--error)';
+  if (n.type === 'key_alert') return severityColor(n.data.severity);
+  if (n.type === 'key_watch_failing') return 'var(--error)';
   return 'var(--warning)'; // budget_alert
 }
 
@@ -74,6 +85,20 @@ function messageFor(t, n) {
     }
     case 'sync_unpriced':
       return { text: t('notifications.syncUnpricedMsg', { provider: n.data.providerLabel, models: (n.data.models || []).join(', ') }) };
+    case 'key_alert': {
+      const d = n.data;
+      const usage = usageSummary(t, d.details || d);
+      const reason = eventReason(t, d.eventType, d.details || d);
+      return {
+        title: t('notifications.keyAlertMsg', { title: eventTitle(t, d.eventType), key: d.keyName || d.keyId, provider: d.providerLabel }),
+        detail: [usage, reason].filter(Boolean).join(' — ') || undefined,
+      };
+    }
+    case 'key_watch_failing': {
+      const key = n.data.errorCode === 'provider_auth' ? 'notifications.keyWatchFailingAuth' : 'notifications.keyWatchFailingMsg';
+      const base = t(key, { provider: n.data.providerLabel, failures: n.data.failures });
+      return { text: n.data.discord === false ? `${base} ${t('notifications.deliveryFailed')}` : base };
+    }
     case 'insight':
       return titleAndDetail(t, { type: n.insight_type, model: n.data.model, metrics: n.data.metrics });
     default:
@@ -88,6 +113,8 @@ function navigateTargetFor(n) {
     case 'reconciliation': return '/dashboard';
     case 'sync_failing':   return '/sync';
     case 'sync_unpriced':  return '/sync';
+    case 'key_alert':      return `/security?key=${encodeURIComponent(n.data.keyId)}`;
+    case 'key_watch_failing': return '/security';
     case 'insight':
       if (n.insight_type === 'improvement') return '/models';
       { const p = new URLSearchParams({ model: n.data.model });
@@ -121,6 +148,7 @@ export default function NotificationBell() {
   const { apiFetch } = useApi();
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { on, off } = useSocket();
 
   const fetchNotifications = () => {
     apiFetch('/api/notifications')
@@ -134,6 +162,14 @@ export default function NotificationBell() {
   };
 
   useEffect(() => { fetchNotifications(); }, []);
+
+  // A key-audit finding is the one notification that must not wait for the
+  // next page load: refetch as soon as the API reports it.
+  useEffect(() => {
+    const onKeyAlert = () => fetchNotifications();
+    on('key-alert', onKeyAlert);
+    return () => off('key-alert', onKeyAlert);
+  }, [on, off]);
 
   useEffect(() => {
     if (!open) return;

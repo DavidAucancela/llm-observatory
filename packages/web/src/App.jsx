@@ -9,6 +9,7 @@ import Activity from './pages/Activity';
 import Models from './pages/Models';
 import Keys from './pages/Keys';
 import Sync from './pages/Sync';
+import Security from './pages/Security';
 import Finance from './pages/Finance';
 import Settings from './pages/Settings';
 import LandingPage    from './pages/LandingPage';
@@ -86,6 +87,7 @@ function AppShell() {
             <Route path="/models"    element={<Models darkMode={darkMode} onToggleDarkMode={toggleDarkMode} />} />
             <Route path="/keys"      element={<Keys darkMode={darkMode} onToggleDarkMode={toggleDarkMode} />} />
             <Route path="/sync"      element={<Sync darkMode={darkMode} onToggleDarkMode={toggleDarkMode} />} />
+            <Route path="/security"  element={<Security darkMode={darkMode} onToggleDarkMode={toggleDarkMode} />} />
             <Route path="/finance"   element={<Finance darkMode={darkMode} onToggleDarkMode={toggleDarkMode} />} />
             <Route path="/settings"  element={<Settings darkMode={darkMode} onToggleDarkMode={toggleDarkMode} />} />
             {/* Legacy redirects */}

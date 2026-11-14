@@ -22,7 +22,10 @@ async function orgDiscordWebhook(orgId, provider) {
 const COLOR = { error: 15158332, warning: 16744272 };
 
 // Returns true (sent), false (send failed) or null (no webhook configured).
-async function sendSyncDiscordAlert(orgId, provider, { title, description, fields = [], severity = 'warning' }) {
+// Also used by services/keyWatch.js (key audit alerts) with its own `footer`.
+async function sendSyncDiscordAlert(orgId, provider, {
+  title, description, fields = [], severity = 'warning', footer = 'LLM Observatory — Sincronización',
+}) {
   const url = await orgDiscordWebhook(orgId, provider);
   if (!url) return null;
   try {
@@ -32,7 +35,7 @@ async function sendSyncDiscordAlert(orgId, provider, { title, description, field
       body: JSON.stringify({
         embeds: [{
           title, description, fields, color: COLOR[severity] || COLOR.warning,
-          footer: { text: 'LLM Observatory — Sincronización' },
+          footer: { text: footer },
           timestamp: new Date().toISOString(),
         }],
       }),

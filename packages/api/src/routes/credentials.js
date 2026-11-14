@@ -6,6 +6,7 @@ const { requireAdmin } = require('../middleware/auth');
 const { PROVIDERS, PROVIDER_CAPS } = require('../constants/providers');
 const { validateGrokManagementKey } = require('../services/providerUsage');
 const { startInitialImport } = require('../services/syncRunner');
+const { startInitialKeyWatch } = require('../services/keyWatch');
 const { emitNewMetric } = require('../services/realtime');
 
 const router = express.Router();
@@ -93,6 +94,9 @@ router.post('/', requireAdmin, async (req, res, next) => {
     // away (the auto-sync would otherwise wait for its next 6-hourly tick).
     // `sync_id` lets the UI point at the run; null = nothing started.
     const syncId = key_type === 'admin' ? await startInitialImport(orgId, provider) : null;
+    // …and starts watching the org's keys on that provider (per-key audit,
+    // services/keyWatch.js) with a 14-day backfill, in the background.
+    if (key_type === 'admin') startInitialKeyWatch(orgId, provider);
     res.status(201).json({ success: true, data: result.rows[0], sync_id: syncId });
   } catch (err) {
     if (err instanceof z.ZodError) return res.status(400).json({ error: err.errors });
