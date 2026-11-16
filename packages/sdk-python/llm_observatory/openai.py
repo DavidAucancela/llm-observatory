@@ -5,7 +5,7 @@ import os
 import time
 from typing import Any, AsyncIterator, Iterator
 
-from ._pricing import calculate_openai_cost
+from ._pricing import _field, calculate_openai_cost, calculate_openai_image_cost
 from ._utils import (
     classify_error,
     extract_full_prompt,
@@ -224,6 +224,227 @@ class _CompletionsProxy:
             }, token=self._w._observatory_token)
 
 
+# ---------------------------------------------------------------------------
+# Images and Responses — shared metric builders (sync and async proxies below)
+# ---------------------------------------------------------------------------
+
+def _image_metric(w: Any, method: str, params: dict[str, Any], usage: Any, count: int,
+                  start: float, status_code: int, error: Exception | None) -> dict[str, Any]:
+    model = params.get("model") or "dall-e-2"  # OpenAI's default when omitted
+    input_t = _as_count(_field(usage, "input_tokens", 0))
+    output_t = _as_count(_field(usage, "output_tokens", 0))
+    cost = None if error else calculate_openai_image_cost(model, usage)
+    preview = f"[image {method}] {str(params.get('prompt') or '')[:180]}"
+    if count > 1:
+        preview = f"{preview[:170]} (×{count})"
+    metric = {
+        "provider": "openai", "model": model,
+        "input_tokens": input_t, "output_tokens": output_t, "total_tokens": input_t + output_t,
+        "cost_usd": cost or 0.0,
+        "latency_ms": int((time.perf_counter() - start) * 1000),
+        "status_code": status_code,
+        "tools_used": [f"images.{method}"],
+        "prompt_preview": preview,
+        "tags": w._tags, "api_key_hint": w._api_key_hint,
+    }
+    if cost is None and not error:
+        metric["cost_confidence"] = "unknown"
+    if error:
+        metric.update(classify_error(error))
+    return metric
+
+
+def _responses_tools(params: dict[str, Any]) -> list[str]:
+    """Built-in tools have only a ``type`` (image_generation, web_search…),
+    function tools a ``name``."""
+    return [n for n in (_field(t, "name") or _field(t, "type") for t in params.get("tools") or []) if n]
+
+
+def _responses_preview(params: dict[str, Any]) -> str:
+    inp = params.get("input")
+    if isinstance(inp, str):
+        return inp[:200]
+    first = inp[0] if isinstance(inp, list) and inp else ""
+    return json.dumps(first, default=str)[:200]
+
+
+def _responses_metric(w: Any, params: dict[str, Any], response: Any, start: float,
+                      status_code: int, error: Exception | None) -> dict[str, Any]:
+    usage = _field(response, "usage")
+    input_t = _as_count(_field(usage, "input_tokens", 0))
+    output_t = _as_count(_field(usage, "output_tokens", 0))
+    output = _field(response, "output") or []
+    image_calls = sum(1 for o in output if _field(o, "type") == "image_generation_call") if isinstance(output, list) else 0
+    preview = _responses_preview(params)
+    metric = {
+        "provider": "openai", "model": params.get("model"),
+        "input_tokens": input_t, "output_tokens": output_t, "total_tokens": input_t + output_t,
+        "cost_usd": calculate_openai_cost(params.get("model"), input_t, output_t) if not error else 0.0,
+        "latency_ms": int((time.perf_counter() - start) * 1000),
+        "status_code": status_code,
+        "tools_used": _responses_tools(params),
+        "prompt_preview": f"[{image_calls} image(s)] {preview}"[:200] if image_calls else preview,
+        "tags": w._tags, "api_key_hint": w._api_key_hint,
+    }
+    # The image tool is billed on top of usage and not reported, so the cost
+    # above only covers text tokens — don't let it pass as exact.
+    if image_calls:
+        metric["cost_confidence"] = "unknown"
+    if error:
+        metric.update(classify_error(error))
+    return metric
+
+
+def _status_of(err: Exception) -> int:
+    return getattr(err, "status_code", 500) or 500
+
+
+class _ImagesProxy:
+    def __init__(self, wrapper: "MonitoredOpenAI") -> None:
+        self._w = wrapper
+
+    def generate(self, **params: Any) -> Any:
+        return self._call("generate", params)
+
+    def edit(self, **params: Any) -> Any:
+        return self._call("edit", params)
+
+    def create_variation(self, **params: Any) -> Any:
+        return self._call("create_variation", params)
+
+    def _send(self, metric: dict[str, Any]) -> None:
+        send_metric_background(self._w._observatory_url, metric, token=self._w._observatory_token)
+
+    def _call(self, method: str, params: dict[str, Any]) -> Any:
+        start = time.perf_counter()
+        try:
+            response = getattr(self._w._client.images, method)(**params)
+        except Exception as err:
+            self._send(_image_metric(self._w, method, params, None, 0, start, _status_of(err), err))
+            raise
+        if params.get("stream"):
+            return self._stream(response, method, params, start)
+        data = _field(response, "data") or []
+        self._send(_image_metric(self._w, method, params, _field(response, "usage"),
+                                 len(data) if isinstance(data, list) else 0, start, 200, None))
+        return response
+
+    def _stream(self, raw: Any, method: str, params: dict[str, Any], start: float) -> Iterator[Any]:
+        usage, count = None, 0
+        try:
+            for event in raw:
+                etype = _field(event, "type")
+                if isinstance(etype, str) and etype.endswith(".completed"):
+                    count += 1
+                    usage = _field(event, "usage") or usage
+                yield event
+        finally:
+            self._send(_image_metric(self._w, method, params, usage, count, start, 200, None))
+
+
+class _ResponsesProxy:
+    def __init__(self, wrapper: "MonitoredOpenAI") -> None:
+        self._w = wrapper
+
+    def _send(self, metric: dict[str, Any]) -> None:
+        send_metric_background(self._w._observatory_url, metric, token=self._w._observatory_token)
+
+    def create(self, **params: Any) -> Any:
+        start = time.perf_counter()
+        try:
+            response = self._w._client.responses.create(**params)
+        except Exception as err:
+            self._send(_responses_metric(self._w, params, None, start, _status_of(err), err))
+            raise
+        if params.get("stream"):
+            return self._stream(response, params, start)
+        self._send(_responses_metric(self._w, params, response, start, 200, None))
+        return response
+
+    def _stream(self, raw: Any, params: dict[str, Any], start: float) -> Iterator[Any]:
+        final = None
+        try:
+            for event in raw:
+                if _field(event, "type") == "response.completed":
+                    final = _field(event, "response")
+                yield event
+        finally:
+            self._send(_responses_metric(self._w, params, final, start, 200, None))
+
+
+class _AsyncImagesProxy:
+    def __init__(self, wrapper: "AsyncMonitoredOpenAI") -> None:
+        self._w = wrapper
+
+    async def generate(self, **params: Any) -> Any:
+        return await self._call("generate", params)
+
+    async def edit(self, **params: Any) -> Any:
+        return await self._call("edit", params)
+
+    async def create_variation(self, **params: Any) -> Any:
+        return await self._call("create_variation", params)
+
+    async def _send(self, metric: dict[str, Any]) -> None:
+        await send_metric_background_async(self._w._observatory_url, metric, token=self._w._observatory_token)
+
+    async def _call(self, method: str, params: dict[str, Any]) -> Any:
+        start = time.perf_counter()
+        try:
+            response = await getattr(self._w._client.images, method)(**params)
+        except Exception as err:
+            await self._send(_image_metric(self._w, method, params, None, 0, start, _status_of(err), err))
+            raise
+        if params.get("stream"):
+            return self._stream(response, method, params, start)
+        data = _field(response, "data") or []
+        await self._send(_image_metric(self._w, method, params, _field(response, "usage"),
+                                       len(data) if isinstance(data, list) else 0, start, 200, None))
+        return response
+
+    async def _stream(self, raw: Any, method: str, params: dict[str, Any], start: float) -> AsyncIterator[Any]:
+        usage, count = None, 0
+        try:
+            async for event in raw:
+                etype = _field(event, "type")
+                if isinstance(etype, str) and etype.endswith(".completed"):
+                    count += 1
+                    usage = _field(event, "usage") or usage
+                yield event
+        finally:
+            await self._send(_image_metric(self._w, method, params, usage, count, start, 200, None))
+
+
+class _AsyncResponsesProxy:
+    def __init__(self, wrapper: "AsyncMonitoredOpenAI") -> None:
+        self._w = wrapper
+
+    async def _send(self, metric: dict[str, Any]) -> None:
+        await send_metric_background_async(self._w._observatory_url, metric, token=self._w._observatory_token)
+
+    async def create(self, **params: Any) -> Any:
+        start = time.perf_counter()
+        try:
+            response = await self._w._client.responses.create(**params)
+        except Exception as err:
+            await self._send(_responses_metric(self._w, params, None, start, _status_of(err), err))
+            raise
+        if params.get("stream"):
+            return self._stream(response, params, start)
+        await self._send(_responses_metric(self._w, params, response, start, 200, None))
+        return response
+
+    async def _stream(self, raw: Any, params: dict[str, Any], start: float) -> AsyncIterator[Any]:
+        final = None
+        try:
+            async for event in raw:
+                if _field(event, "type") == "response.completed":
+                    final = _field(event, "response")
+                yield event
+        finally:
+            await self._send(_responses_metric(self._w, params, final, start, 200, None))
+
+
 class _ChatProxy:
     def __init__(self, wrapper: "MonitoredOpenAI") -> None:
         self.completions = _CompletionsProxy(wrapper)
@@ -256,6 +477,8 @@ class MonitoredOpenAI:
         self._api_key_hint      = mask_key(resolved_key)
         self._client            = _OpenAI(api_key=api_key, **kwargs)
         self.chat               = _ChatProxy(self)
+        self.images             = _ImagesProxy(self)
+        self.responses          = _ResponsesProxy(self)
 
 
 # ---------------------------------------------------------------------------
@@ -435,3 +658,5 @@ class AsyncMonitoredOpenAI:
         self._api_key_hint      = mask_key(resolved_key)
         self._client            = _AsyncOpenAI(api_key=api_key, **kwargs)
         self.chat               = _AsyncChatProxy(self)
+        self.images             = _AsyncImagesProxy(self)
+        self.responses          = _AsyncResponsesProxy(self)
