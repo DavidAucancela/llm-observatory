@@ -119,6 +119,39 @@ def calculate_openai_cost(model: str, input_tokens: int, output_tokens: int) -> 
            (output_tokens / 1_000_000) * pricing["output"]
 
 
+# Image models (images.generate/edit): price per million tokens, split by input
+# kind. Only confirmed prices — any other image model (newer gpt-image-*,
+# dall-e-*) is recorded as cost_confidence 'unknown' instead of a guess. Keep in
+# sync with OPENAI_IMAGE_PRICING in packages/sdk/src/index.js.
+OPENAI_IMAGE_PRICING: dict[str, dict[str, float]] = {
+    "gpt-image-1":      {"text_input": 5.00, "image_input": 10.00, "output": 40.00},
+    "gpt-image-1-mini": {"text_input": 2.00, "image_input":  2.50, "output":  8.00},
+}
+
+
+def _field(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def calculate_openai_image_cost(model: str | None, usage: Any) -> float | None:
+    """Token cost of an image call, or None when the model isn't priced or the
+    response carries no usage (so the caller flags it 'unknown', not $0)."""
+    pricing = OPENAI_IMAGE_PRICING.get(normalize_model_id(model, OPENAI_IMAGE_PRICING))
+    if not pricing or usage is None:
+        return None
+    details = _field(usage, "input_tokens_details")
+    image_in = _field(details, "image_tokens", 0) or 0
+    text_in = _field(details, "text_tokens", None)
+    if not isinstance(text_in, (int, float)):
+        text_in = max(0, (_field(usage, "input_tokens", 0) or 0) - image_in)
+    output = _field(usage, "output_tokens", 0) or 0
+    return (text_in * pricing["text_input"] + image_in * pricing["image_input"] + output * pricing["output"]) / 1_000_000
+
+
 # Cost per million tokens (USD) — July 2026. Standard (<=200k context) tier only;
 # gemini-*-pro models roughly double past 200k context, not modeled here (keep in
 # sync with GEMINI_PRICING in packages/sdk/src/index.js).

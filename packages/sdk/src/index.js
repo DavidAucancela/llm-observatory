@@ -55,6 +55,15 @@ const OPENAI_EMBEDDINGS_PRICING = {
   'text-embedding-ada-002': 0.10,
 };
 
+// Image models (images.generate/edit): price per million tokens, split by
+// input kind. Only the models whose prices are confirmed — any other image
+// model (newer gpt-image-*, dall-e-*) records cost_confidence 'unknown'
+// instead of a guessed figure.
+const OPENAI_IMAGE_PRICING = {
+  'gpt-image-1':      { text_input: 5.00, image_input: 10.00, output: 40.00 },
+  'gpt-image-1-mini': { text_input: 2.00, image_input:  2.50, output:  8.00 },
+};
+
 // Whisper: price per minute of audio
 const OPENAI_WHISPER_PRICE_PER_MINUTE = 0.006;
 
@@ -343,6 +352,30 @@ function calculateOpenAIEmbeddingCost(model, inputTokens) {
   return (inputTokens / 1_000_000) * price;
 }
 
+// Returns null when the model isn't priced (or the response has no usage), so
+// callers can flag the metric 'unknown' rather than book a false $0.
+function calculateOpenAIImageCost(model, usage) {
+  const pricing = OPENAI_IMAGE_PRICING[normalizeModelId(model, OPENAI_IMAGE_PRICING)];
+  if (!pricing || !usage) return null;
+  const details = usage.input_tokens_details || {};
+  const imageIn = details.image_tokens || 0;
+  const textIn  = details.text_tokens ?? Math.max(0, (usage.input_tokens || 0) - imageIn);
+  return (textIn * pricing.text_input + imageIn * pricing.image_input + (usage.output_tokens || 0) * pricing.output) / 1_000_000;
+}
+
+// Responses API: tool names as the caller declared them — built-in tools have
+// only a `type` (image_generation, web_search, …), function tools a `name`.
+function extractResponsesToolNames(params) {
+  return (params?.tools || []).map(t => t?.name || t?.type).filter(Boolean);
+}
+
+// Image-generation tool calls in a Responses output. Their cost is billed on
+// top of response.usage and the API doesn't report it, so a response with any
+// of them has an incomplete cost.
+function countResponsesImageCalls(response) {
+  return (response?.output || []).filter(o => o?.type === 'image_generation_call').length;
+}
+
 function calculateWhisperCost(durationSeconds) {
   return (durationSeconds / 60) * OPENAI_WHISPER_PRICE_PER_MINUTE;
 }
@@ -526,6 +559,76 @@ class MonitoredOpenAI {
       speech:         { create: this._createSpeech.bind(this) },
     };
     this.responses = { create: this._createResponse.bind(this) };
+    this.images = {
+      generate:        (params) => this._createImage('generate', params),
+      edit:            (params) => this._createImage('edit', params),
+      createVariation: (params) => this._createImage('createVariation', params),
+    };
+  }
+
+  // images.generate / edit / createVariation. gpt-image models report token
+  // usage (priced from OPENAI_IMAGE_PRICING); dall-e models don't, so those —
+  // and any image model without a price — are recorded as cost 'unknown'.
+  async _createImage(method, params = {}) {
+    const startTime = Date.now();
+    const model = params.model || 'dall-e-2'; // OpenAI's default when omitted
+    const tools = [`images.${method}`];
+    const preview = `[image ${method}] ${String(params.prompt || '').substring(0, 180)}`;
+
+    if (params.stream) {
+      let stream;
+      try {
+        stream = await this.client.images[method](params);
+      } catch (err) {
+        this._sendImageMetric(model, null, 0, startTime, err.status || 500, tools, preview, err);
+        throw err;
+      }
+      return this._wrapImageStream(stream, model, startTime, tools, preview);
+    }
+
+    let response, statusCode = 200, error = null;
+    try {
+      response = await this.client.images[method](params);
+    } catch (err) {
+      statusCode = err.status || 500;
+      error = err;
+    }
+    const count = response?.data?.length || 0;
+    this._sendImageMetric(model, response?.usage, count, startTime, statusCode, tools, preview, error);
+    if (error) throw error;
+    return response;
+  }
+
+  async* _wrapImageStream(stream, model, startTime, tools, preview) {
+    let usage = null, count = 0;
+    try {
+      for await (const event of stream) {
+        if (typeof event?.type === 'string' && event.type.endsWith('.completed')) {
+          count += 1;
+          if (event.usage) usage = event.usage;
+        }
+        yield event;
+      }
+    } finally {
+      this._sendImageMetric(model, usage, count, startTime, 200, tools, preview, null);
+    }
+  }
+
+  _sendImageMetric(model, usage, count, startTime, statusCode, tools, preview, error) {
+    const inputTokens  = usage?.input_tokens  || 0;
+    const outputTokens = usage?.output_tokens || 0;
+    const cost = error ? 0 : calculateOpenAIImageCost(model, usage);
+    this._sendMetric({
+      provider: 'openai', model,
+      input_tokens: inputTokens, output_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
+      cost_usd: cost ?? 0,
+      ...(cost == null ? { cost_confidence: 'unknown' } : {}),
+      latency_ms: Date.now() - startTime, status_code: statusCode,
+      tools_used: tools,
+      prompt_preview: count > 1 ? `${preview.substring(0, 170)} (×${count})` : preview,
+      tags: this.tags, api_key_hint: this.apiKeyHint, ...(error ? classifyError(error) : {}),
+    }).catch(err => console.warn('[LLM Observatory] Failed to send metric:', err.message));
   }
 
   async _createCompletion(params) {
@@ -742,6 +845,7 @@ class MonitoredOpenAI {
     const inputPreview = typeof params.input === 'string'
       ? params.input.substring(0, 200)
       : JSON.stringify(params.input?.[0] || '').substring(0, 200);
+    const tools = extractResponsesToolNames(params);
 
     if (params.stream) {
       let stream;
@@ -751,12 +855,12 @@ class MonitoredOpenAI {
         this._sendMetric({
           provider: 'openai', model: params.model, input_tokens: 0, output_tokens: 0,
           total_tokens: 0, cost_usd: 0, latency_ms: Date.now() - startTime,
-          status_code: err.status || 500, tools_used: [], prompt_preview: inputPreview,
+          status_code: err.status || 500, tools_used: tools, prompt_preview: inputPreview,
           tags: this.tags, api_key_hint: this.apiKeyHint, ...classifyError(err),
         }).catch(() => {});
         throw err;
       }
-      return this._wrapResponsesStream(stream, startTime, params, inputPreview);
+      return this._wrapResponsesStream(stream, startTime, params, inputPreview, tools);
     }
 
     let response, statusCode = 200, error = null;
@@ -767,42 +871,39 @@ class MonitoredOpenAI {
       error = err;
     }
 
+    this._sendResponsesMetric(params, response, startTime, statusCode, inputPreview, tools, error);
+    if (error) throw error;
+    return response;
+  }
+
+  _sendResponsesMetric(params, response, startTime, statusCode, inputPreview, tools, error) {
     const inputTokens  = response?.usage?.input_tokens  || 0;
     const outputTokens = response?.usage?.output_tokens || 0;
+    const imageCalls   = countResponsesImageCalls(response);
     this._sendMetric({
       provider: 'openai', model: params.model,
       input_tokens: inputTokens, output_tokens: outputTokens,
       total_tokens: inputTokens + outputTokens,
       cost_usd: calculateOpenAICost(params.model, inputTokens, outputTokens),
+      // The image tool is billed separately and not reported — the cost above
+      // only covers the text tokens, so don't let it pass as exact.
+      ...(imageCalls > 0 ? { cost_confidence: 'unknown' } : {}),
       latency_ms: Date.now() - startTime, status_code: statusCode,
-      tools_used: [], prompt_preview: inputPreview,
+      tools_used: tools,
+      prompt_preview: imageCalls > 0 ? `[${imageCalls} image(s)] ${inputPreview}`.substring(0, 200) : inputPreview,
       tags: this.tags, api_key_hint: this.apiKeyHint, ...(error ? classifyError(error) : {}),
     }).catch(err => console.warn('[LLM Observatory] Failed to send metric:', err.message));
-
-    if (error) throw error;
-    return response;
   }
 
-  async* _wrapResponsesStream(stream, startTime, params, inputPreview) {
-    let inputTokens = 0, outputTokens = 0;
+  async* _wrapResponsesStream(stream, startTime, params, inputPreview, tools = []) {
+    let finalResponse = null;
     try {
       for await (const event of stream) {
-        if (event.type === 'response.completed') {
-          inputTokens  = event.response?.usage?.input_tokens  || 0;
-          outputTokens = event.response?.usage?.output_tokens || 0;
-        }
+        if (event.type === 'response.completed') finalResponse = event.response;
         yield event;
       }
     } finally {
-      this._sendMetric({
-        provider: 'openai', model: params.model,
-        input_tokens: inputTokens, output_tokens: outputTokens,
-        total_tokens: inputTokens + outputTokens,
-        cost_usd: calculateOpenAICost(params.model, inputTokens, outputTokens),
-        latency_ms: Date.now() - startTime, status_code: 200,
-        tools_used: [], prompt_preview: inputPreview,
-        tags: this.tags, api_key_hint: this.apiKeyHint,
-      }).catch(err => console.warn('[LLM Observatory] Failed to send metric:', err.message));
+      this._sendResponsesMetric(params, finalResponse, startTime, 200, inputPreview, tools, null);
     }
   }
 
@@ -1149,6 +1250,7 @@ module.exports = {
   calculateCost,
   calculateOpenAICost,
   calculateOpenAIEmbeddingCost,
+  calculateOpenAIImageCost,
   calculateWhisperCost,
   calculateTTSCost,
   calculateGeminiCost,
@@ -1160,6 +1262,7 @@ module.exports = {
   ANTHROPIC_PRICING,
   OPENAI_PRICING,
   OPENAI_EMBEDDINGS_PRICING,
+  OPENAI_IMAGE_PRICING,
   OPENAI_WHISPER_PRICE_PER_MINUTE,
   OPENAI_TTS_PRICING,
   GEMINI_PRICING,
